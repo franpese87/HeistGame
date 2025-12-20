@@ -33,16 +33,16 @@ return {
 	-- ==============================================================================
 	logging = {
 		-- Transiciones de estado (Patrolling → Chasing → Returning, etc.)
-		stateChanges = true,
+		stateChanges = false,
 
 		-- Sistema de detección (accumulator, coyote time, target acquisition/loss)
 		detection = false,
 
 		-- Cálculo y seguimiento de rutas (pathfinding A*, seguimiento de nodos)
-		pathfinding = true,
+		pathfinding = false,
 
 		-- Estado RETURNING específico (bug conocido: navegación al volver a patrulla)
-		returning = true,
+		returning = false,
 
 		-- Búsqueda de nodos en el grafo (GetNearestNode, spatial hash)
 		nodeSearch = false,
