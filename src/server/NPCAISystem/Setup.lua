@@ -1,28 +1,79 @@
 local Setup = {}
 
+--[[
+	CreateNavigationGraphFromFolder - Crea un grafo de navegación desde carpetas
+
+	Parámetros:
+	- nodesFolder: Carpeta raíz "NavigationNodes" con estructura:
+	    ▼ NavigationNodes
+	      ▼ Floor_0, Floor_1, etc.
+	      ▼ Stairs
+
+	- options:
+	    - destroyParts: (bool) Destruir Parts después de cargar (default: true)
+	    - cellSizeX: (number) Tamaño de celda X para spatial hash (default: 16)
+	    - cellSizeZ: (number) Tamaño de celda Z para spatial hash (default: 14)
+	    - floorHeight: (number) Altura de cada piso (default: 10)
+	    - floorBaseY: (number) Y base del piso 0 (default: 0)
+	    - mode: (string) Si se especifica, auto-conecta nodos
+	    - maxDistance: (number) Distancia máxima para conexiones (default: 20)
+	    - maxStairDistance: (number) Distancia para conexiones de escalera (default: 10)
+	    - useRaycast: (bool) Usar raycast para validar conexiones (default: false)
+	    - ignoreList: (table) Instancias a ignorar en raycast
+	    - debug: (table) Configuración de logging { nodeSearch, astar, loading }
+]]
 function Setup.CreateNavigationGraphFromFolder(nodesFolder, options)
 	options = options or {}
 	local NavigationGraph = require(script.Parent.NavigationGraph)
 
-	-- Pasar config de logging al NavigationGraph
-	local loggingConfig = options.logging or {}
-	local graph = NavigationGraph.new(loggingConfig)
+	-- Configuración del grafo
+	local graphConfig = {
+		cellSizeX = options.cellSizeX or 16,
+		cellSizeZ = options.cellSizeZ or 14,
+		floorHeight = options.floorHeight or 10,
+		floorBaseY = options.floorBaseY or 0,
+		debug = options.debug or options.logging or {},
+	}
+
+	local graph = NavigationGraph.new(graphConfig)
 
 	if not nodesFolder then
 		return graph
 	end
 
-	-- Usar el nuevo sistema LoadFromParts
-	local shouldDestroyParts = options.destroyParts
-	if shouldDestroyParts == nil then
-		shouldDestroyParts = true  -- Por defecto, destruir Parts
+	-- Detectar si es estructura nueva (con Floor_X) o legacy (Parts planas)
+	local hasFloorFolders = false
+	for _, child in ipairs(nodesFolder:GetChildren()) do
+		if child:IsA("Folder") and string.match(child.Name, "^Floor_%-?%d+") then
+			hasFloorFolders = true
+			break
+		end
 	end
-	
-	graph:LoadFromParts(nodesFolder, shouldDestroyParts)
+
+	-- Cargar nodos
+	if hasFloorFolders then
+		-- Nueva estructura de carpetas
+		graph:LoadFromFolderStructure(nodesFolder, {
+			destroyParts = options.destroyParts ~= false,
+		})
+	else
+		-- Legacy: carpeta plana con Parts
+		local shouldDestroyParts = options.destroyParts
+		if shouldDestroyParts == nil then
+			shouldDestroyParts = true
+		end
+		graph:LoadFromParts(nodesFolder, shouldDestroyParts)
+	end
 
 	-- Auto-conectar si se especificó modo
 	if options.mode then
-		graph:AutoConnect(options)
+		graph:AutoConnect({
+			maxDistance = options.maxDistance or 20,
+			maxStairDistance = options.maxStairDistance or 10,
+			useRaycast = options.useRaycast or false,
+			maxConnectionsPerNode = options.maxConnectionsPerNode or 6,
+			ignoreList = options.ignoreList or {},
+		})
 	end
 
 	return graph

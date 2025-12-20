@@ -639,8 +639,37 @@ function NPCAIController:CalculateGraphPathToPosition(targetPosition)
 
 	if path and #path > 0 then
 		self.currentPath = path
-		self.currentPathIndex = 1
-		self:Log("pathfinding", "PATH CALCULADO: " .. startNode.name .. " → " .. endNode.name .. " (" .. #path .. " nodos)")
+
+		-- Encontrar el mejor punto de inicio en el path
+		-- En lugar de siempre empezar en índice 1, buscar el nodo más cercano
+		-- que esté "adelante" en la dirección del objetivo
+		local bestIndex = 1
+		local npcPos = self.rootPart.Position
+		local bestScore = math.huge
+
+		for i, node in ipairs(path) do
+			local distToNode = (npcPos - node.position).Magnitude
+			-- Penalizar nodos que están más lejos del objetivo final
+			local distNodeToEnd = (node.position - targetPosition).Magnitude
+			-- Score: queremos estar cerca del nodo Y que ese nodo esté cerca del final
+			local score = distToNode + distNodeToEnd * 0.1
+
+			if distToNode < 5 and score < bestScore then
+				bestScore = score
+				bestIndex = i
+			end
+		end
+
+		-- Si estamos muy cerca del nodo en bestIndex, avanzar al siguiente
+		if bestIndex < #path then
+			local distToBest = (npcPos - path[bestIndex].position).Magnitude
+			if distToBest < 2 then
+				bestIndex = bestIndex + 1
+			end
+		end
+
+		self.currentPathIndex = bestIndex
+		self:Log("pathfinding", "PATH CALCULADO: " .. startNode.name .. " → " .. endNode.name .. " (" .. #path .. " nodos, inicio=" .. bestIndex .. ")")
 	else
 		self:Log("pathfinding", "PATH NO ENCONTRADO: " .. startNode.name .. " → " .. endNode.name .. " (nodos desconectados?)")
 		self.currentPath = nil
@@ -671,13 +700,14 @@ function NPCAIController:ChaseUsingPathfinding(targetRoot)
 	self.humanoid:MoveTo(targetRoot.Position)
 end
 
+-- NavigateToPosition: Usado para persecución (objetivo dinámico)
+-- Para objetivos estáticos (retorno), usar EnterReturning + FollowCurrentPath
 function NPCAIController:NavigateToPosition(position)
 	if self.navigationMode == "graph" or self.navigationMode == "hybrid" then
 		local currentTime = tick()
 
-		if not self.currentPath or 
-			currentTime - self.lastPathCalculation > self.pathRecalculateInterval then
-
+		-- Recalcular si no hay path o pasó el intervalo
+		if not self.currentPath or currentTime - self.lastPathCalculation > self.pathRecalculateInterval then
 			self:CalculateGraphPathToPosition(position)
 			self.lastPathCalculation = currentTime
 		end
@@ -746,52 +776,73 @@ function NPCAIController:PerformAttack()
 end
 
 -- ==============================================================================
--- RETURNING
+-- RETURNING (Arquitectura Enter/Update separada)
 -- ==============================================================================
+
+function NPCAIController:EnterReturning()
+	-- Limpiar estado de persecución
+	self.target = nil
+	self.lastSeenPosition = nil
+	self.detectionFrameCount = nil
+	self.lostDetectionTime = nil
+
+	-- Determinar destino de retorno (se calcula UNA vez al entrar)
+	self.returnTargetNode = self:GetNearestPatrolNode()
+
+	if not self.returnTargetNode then
+		warn("[" .. self.npc.Name .. "] No se encontró nodo de patrulla para retorno")
+		return
+	end
+
+	-- Calcular ruta completa UNA sola vez
+	self:CalculateGraphPathToPosition(self.returnTargetNode.Position)
+
+	self:Log("returning", "Iniciando retorno a " .. self.returnTargetNode.Name ..
+		" (dist=" .. string.format("%.1f", (self.rootPart.Position - self.returnTargetNode.Position).Magnitude) .. ")" ..
+		(self.currentPath and (" [" .. #self.currentPath .. " nodos]") or " [directo]"))
+end
 
 function NPCAIController:UpdateReturning()
 	self.humanoid.WalkSpeed = self.patrolSpeed
 
-	-- 🆕 Caminar de regreso
 	if self.animator then
 		self.animator:PlayAnimation("walk")
 	end
 
-	-- Resetear detección parcial durante retorno
-	if self.detectionFrameCount and self.detectionFrameCount > 0 and not self.target then
-		self.detectionFrameCount = nil
-	end
-
+	-- Interrupción: Si detectamos target, volver a CHASING
 	if self.target then
 		self:Log("returning", "Target detectado durante retorno, volviendo a CHASING")
-		self.currentPath = nil
-		self.currentPathIndex = 1
 		self:ChangeState(AIState.CHASING)
 		return
 	end
 
-	local nearestPatrolNode = self:GetNearestPatrolNode()
-
-	if nearestPatrolNode then
-		local distance = (self.rootPart.Position - nearestPatrolNode.Position).Magnitude
+	-- Verificar si llegamos al destino
+	if self.returnTargetNode then
+		local distance = (self.rootPart.Position - self.returnTargetNode.Position).Magnitude
 
 		if distance < 3 then
-			self:Log("returning", "Llegué a nodo patrulla: " .. nearestPatrolNode.Name)
-			self.currentPath = nil
+			self:Log("returning", "Llegué a nodo patrulla: " .. self.returnTargetNode.Name)
 			self:ChangeState(AIState.PATROLLING)
 			return
 		end
-
-		-- Log periódico del estado de navegación
-		if self.logFlags.returning then
-			local pathStatus = self.currentPath and (#self.currentPath .. " nodos, idx=" .. self.currentPathIndex) or "SIN PATH"
-			self:Log("returning", "Navegando a " .. nearestPatrolNode.Name .. " (dist=" .. string.format("%.1f", distance) .. ") [" .. pathStatus .. "]")
-		end
-
-		self:NavigateToPosition(nearestPatrolNode.Position)
-	else
-		self:Log("returning", "ERROR: No se encontró nodo de patrulla cercano")
 	end
+
+	-- Ejecutar el plan: seguir el path pre-calculado
+	if self.currentPath and #self.currentPath > 0 then
+		self:FollowCurrentPath()
+	elseif self.returnTargetNode then
+		-- Fallback: movimiento directo si no hay path
+		self.humanoid:MoveTo(self.returnTargetNode.Position)
+	else
+		-- Sin destino válido, volver a patrullar
+		self:ChangeState(AIState.PATROLLING)
+	end
+end
+
+function NPCAIController:ExitReturning()
+	self.returnTargetNode = nil
+	self.currentPath = nil
+	self.currentPathIndex = 1
 end
 
 function NPCAIController:GetNearestPatrolNode()
@@ -900,6 +951,8 @@ function NPCAIController:ChangeState(newState)
 	-- EXIT del estado anterior
 	if self.currentState == AIState.OBSERVING then
 		self:ExitObserving()
+	elseif self.currentState == AIState.RETURNING then
+		self:ExitReturning()
 	end
 
 	local oldState = self.currentState
@@ -909,7 +962,7 @@ function NPCAIController:ChangeState(newState)
 	-- Debug: Log transición de estado
 	self:Log("stateChanges", oldState .. " → " .. newState)
 
-	-- 🆕 Actualizar indicador visual de estado
+	-- Actualizar indicador visual de estado
 	if self.showStateIndicator then
 		self:UpdateStateIndicator()
 	end
@@ -932,12 +985,7 @@ function NPCAIController:ChangeState(newState)
 		self.targetLastPosition = nil
 
 	elseif newState == AIState.RETURNING then
-		self.target = nil
-		self.lastSeenPosition = nil
-		self.currentPath = nil
-		self.currentPathIndex = 1
-		self.detectionFrameCount = nil
-		self.lostDetectionTime = nil
+		self:EnterReturning()
 	end
 end
 

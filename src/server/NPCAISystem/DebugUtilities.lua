@@ -78,19 +78,29 @@ function DebugUtilities.DrawNodes(graph, options)
 end
 
 -- ==============================================================================
--- VISUALIZACIÓN DE CELDAS (SPATIAL HASH)
+-- VISUALIZACIÓN DE CELDAS (SPATIAL HASH 2D POR PISO)
 -- ==============================================================================
 
 function DebugUtilities.DrawCells(graph, options)
-	if not graph.spatialGrid then
+	if not graph.spatialGrids or not next(graph.spatialGrids) then
+		warn("DebugUtilities.DrawCells: No hay spatial grids para dibujar")
 		return
 	end
 
 	options = options or {}
-	local color = options.cellColor or options.color or Color3.fromRGB(100, 200, 255)
 	local transparency = options.cellTransparency or options.transparency or 0.85
 	local wireframe = options.cellWireframe ~= false
 	local showLabels = options.showLabels ~= false
+	local cellHeight = options.cellHeight or graph.floorHeight or 10
+
+	-- Colores por piso
+	local floorColors = {
+		[0] = Color3.fromRGB(100, 200, 255),  -- Azul
+		[1] = Color3.fromRGB(100, 255, 100),  -- Verde
+		[2] = Color3.fromRGB(255, 200, 100),  -- Naranja
+		[-1] = Color3.fromRGB(200, 100, 255), -- Morado
+	}
+	local defaultColor = Color3.fromRGB(150, 150, 150)
 
 	-- Limpiar debug anterior
 	local existingFolder = workspace:FindFirstChild("DEBUG_Cells")
@@ -104,71 +114,78 @@ function DebugUtilities.DrawCells(graph, options)
 
 	local count = 0
 
-	for cellKey, nodes in pairs(graph.spatialGrid) do
-		-- Parsear índices de celda desde la key
-		local coords = string.split(cellKey, ",")
-		local cellX = tonumber(coords[1])
-		local cellY = tonumber(coords[2])
-		local cellZ = tonumber(coords[3])
+	-- Iterar por cada piso
+	for floor, grid in pairs(graph.spatialGrids) do
+		local floorFolder = Instance.new("Folder")
+		floorFolder.Name = "Floor_" .. floor
+		floorFolder.Parent = folder
 
-		-- Calcular posición central EXACTA de la celda desde su índice
-		local centerPos = Vector3.new(
-			cellX * graph.cellSizeX + graph.cellSizeX / 2,
-			cellY * graph.cellSizeY + graph.cellSizeY / 2,
-			cellZ * graph.cellSizeZ + graph.cellSizeZ / 2
-		)
+		local color = floorColors[floor] or defaultColor
 
-		local cellSize = Vector3.new(graph.cellSizeX, graph.cellSizeY, graph.cellSizeZ)
+		-- Calcular Y base para este piso
+		local floorBaseY = (graph.floorBaseY or 0) + floor * (graph.floorHeight or 10)
 
-		-- Crear Part para la celda
-		local cellPart = Instance.new("Part")
-		cellPart.Name = "Cell_" .. cellKey
-		cellPart.Size = cellSize
-		cellPart.Position = centerPos
-		cellPart.Anchored = true
-		cellPart.CanCollide = false
-		cellPart.CanQuery = false
-		cellPart.Color = color
-		cellPart.Material = Enum.Material.SmoothPlastic
+		for cellKey, nodes in pairs(grid) do
+			-- Parsear índices de celda desde la key (ahora solo X,Z)
+			local coords = string.split(cellKey, ",")
+			local cellX = tonumber(coords[1])
+			local cellZ = tonumber(coords[2])
 
-		if wireframe then
-			-- Modo wireframe (solo bordes)
-			cellPart.Transparency = 1
+			-- Calcular posición central de la celda 2D
+			local centerPos = Vector3.new(
+				cellX * graph.cellSizeX + graph.cellSizeX / 2,
+				floorBaseY + cellHeight / 2,
+				cellZ * graph.cellSizeZ + graph.cellSizeZ / 2
+			)
 
-			-- Crear SelectionBox para mostrar bordes
-			local selectionBox = Instance.new("SelectionBox")
-			selectionBox.Adornee = cellPart
-			selectionBox.LineThickness = 0.05
-			selectionBox.Color3 = color
-			selectionBox.Transparency = 0.3
-			selectionBox.Parent = cellPart
-		else
-			-- Modo sólido
-			cellPart.Transparency = transparency
+			local cellSize = Vector3.new(graph.cellSizeX, cellHeight, graph.cellSizeZ)
+
+			-- Crear Part para la celda
+			local cellPart = Instance.new("Part")
+			cellPart.Name = "Cell_F" .. floor .. "_" .. cellKey
+			cellPart.Size = cellSize
+			cellPart.Position = centerPos
+			cellPart.Anchored = true
+			cellPart.CanCollide = false
+			cellPart.CanQuery = false
+			cellPart.Color = color
+			cellPart.Material = Enum.Material.SmoothPlastic
+
+			if wireframe then
+				cellPart.Transparency = 1
+				local selectionBox = Instance.new("SelectionBox")
+				selectionBox.Adornee = cellPart
+				selectionBox.LineThickness = 0.05
+				selectionBox.Color3 = color
+				selectionBox.Transparency = 0.3
+				selectionBox.Parent = cellPart
+			else
+				cellPart.Transparency = transparency
+			end
+
+			cellPart.Parent = floorFolder
+
+			-- Etiqueta con información
+			if showLabels then
+				local billboard = Instance.new("BillboardGui")
+				billboard.Size = UDim2.fromOffset(120, 50)
+				billboard.StudsOffset = Vector3.new(0, cellHeight / 2 + 1, 0)
+				billboard.AlwaysOnTop = true
+				billboard.Parent = cellPart
+
+				local label = Instance.new("TextLabel")
+				label.Size = UDim2.fromScale(1, 1)
+				label.BackgroundTransparency = 1
+				label.Text = "F" .. floor .. " " .. cellKey .. "\n(" .. #nodes .. " nodos)"
+				label.TextColor3 = Color3.new(1, 1, 1)
+				label.TextScaled = true
+				label.Font = Enum.Font.SourceSansBold
+				label.TextStrokeTransparency = 0.5
+				label.Parent = billboard
+			end
+
+			count = count + 1
 		end
-
-		cellPart.Parent = folder
-
-		-- Etiqueta con información
-		if showLabels then
-			local billboard = Instance.new("BillboardGui")
-			billboard.Size = UDim2.fromOffset(120, 50)
-			billboard.StudsOffset = Vector3.new(0, cellSize.Y / 2 + 1, 0)
-			billboard.AlwaysOnTop = true
-			billboard.Parent = cellPart
-
-			local label = Instance.new("TextLabel")
-			label.Size = UDim2.fromScale(1, 1)
-			label.BackgroundTransparency = 1
-			label.Text = cellKey .. "\n(" .. #nodes .. " nodos)"
-			label.TextColor3 = Color3.new(1, 1, 1)
-			label.TextScaled = true
-			label.Font = Enum.Font.SourceSansBold
-			label.TextStrokeTransparency = 0.5
-			label.Parent = billboard
-		end
-
-		count = count + 1
 	end
 
 	return folder
@@ -326,17 +343,26 @@ function DebugUtilities.PrintSystemReport(npcManager, navGraph, spawnedNPCs, bas
 	print("🗺️  Total de nodos: " .. navGraph:GetNodesCount())
 	print("🔗 Total de conexiones: " .. navGraph:GetConnectionCount())
 
-	-- Estadísticas del spatial hash
-	if navGraph.spatialGrid then
-		local cellCount = 0
+	-- Estadísticas del spatial hash 2D (por piso)
+	if navGraph.spatialGrids and next(navGraph.spatialGrids) then
+		local floorCount = 0
+		local totalCells = 0
 		local totalNodesInCells = 0
-		for _, nodes in pairs(navGraph.spatialGrid) do
-			cellCount = cellCount + 1
-			totalNodesInCells = totalNodesInCells + #nodes
+
+		for _, grid in pairs(navGraph.spatialGrids) do
+			floorCount = floorCount + 1
+			for _, nodes in pairs(grid) do
+				totalCells = totalCells + 1
+				totalNodesInCells = totalNodesInCells + #nodes
+			end
 		end
-		print("🔲 Spatial Hash:")
-		print("   Celdas ocupadas: " .. cellCount)
-		print("   Nodos por celda (promedio): " .. string.format("%.1f", totalNodesInCells / cellCount))
+
+		print("🔲 Spatial Hash 2D:")
+		print("   Pisos con grids: " .. floorCount)
+		print("   Celdas ocupadas (total): " .. totalCells)
+		if totalCells > 0 then
+			print("   Nodos por celda (promedio): " .. string.format("%.1f", totalNodesInCells / totalCells))
+		end
 	end
 
 	-- Lista de NPCs spawneados
