@@ -41,8 +41,8 @@ function DebugUtilities.DrawNodes(graph, options)
 		-- Etiqueta
 		if showLabels then
 			local billboard = Instance.new("BillboardGui")
-			billboard.Size = UDim2.fromOffset(100, 40)
-			billboard.StudsOffset = Vector3.new(0, 1, 0)
+			billboard.Size = UDim2.fromOffset(50, 20)
+			billboard.StudsOffset = Vector3.new(0, 0, 0)
 			billboard.AlwaysOnTop = true
 			billboard.Parent = sphere
 

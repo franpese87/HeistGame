@@ -145,7 +145,7 @@ end
 -- MAIN UPDATE LOOP
 -- ==============================================================================
 
-function NPCAIController:Update(deltaTime)
+function NPCAIController:Update(_deltaTime )
 	if not self.isActive or not self.humanoid or self.humanoid.Health <= 0 then
 		self.isActive = false
 		return
