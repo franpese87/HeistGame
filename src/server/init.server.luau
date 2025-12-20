@@ -1,38 +1,15 @@
 local NPCAISystem = require(script.NPCAISystem)
+local DebugConfig = require(script.Config.DebugConfig)
+local NPCBaseConfig = require(script.Config.NPCBaseConfig)
+local NPCSpawnList = require(script.Config.NPCSpawnList)
+
+local RunService = game:GetService("RunService")
+local isStudio = RunService:IsStudio()
 
 print("🎮 Iniciando sistema de NPCs...")
 
 -- ==============================================================================
--- CONFIGURACIÓN DE DEBUG VISUAL
--- ==============================================================================
-
-local DEBUG_CONFIG = {
-	-- Control de visualización
-	keepNodesInWorkspace = false,        -- 🔄 true = mantener Parts, false = destruir
-	visualizeOnStartup = true,           -- 🔄 true = visualizar al inicio
-	
-	-- Qué visualizar
-	showNodes = true,
-	showCells = true,
-	showConnections = true,
-	
-	-- Estilo visual - Nodos
-	nodeColor = Color3.fromRGB(0, 255, 0),
-	nodeSize = 0.5,
-	nodeTransparency = 0.3,
-	
-	-- Estilo visual - Celdas
-	cellColor = Color3.fromRGB(100, 200, 255),
-	cellTransparency = 0.85,
-	cellWireframe = true,
-	
-	-- Estilo visual - Conexiones
-	connectionColor = Color3.fromRGB(153, 202, 255),
-	connectionWidth = 0.1,
-}
-
--- ==============================================================================
--- CONFIGURACIÓN DEL GRAFO DE NAVEGACIÓN
+-- 1. CREAR GRAFO DE NAVEGACIÓN
 -- ==============================================================================
 
 local navGraph = NPCAISystem.Setup.CreateNavigationGraphFromFolder(
@@ -42,32 +19,49 @@ local navGraph = NPCAISystem.Setup.CreateNavigationGraphFromFolder(
 		maxDistance = 40,
 		useRaycast = true,
 		maxConnectionsPerNode = 6,
-		ignoreList = {workspace.NavigationNodes},
-		destroyParts = not DEBUG_CONFIG.keepNodesInWorkspace  -- Destruir si no está en modo debug
+		ignoreList = { workspace.NavigationNodes },
+		destroyParts = not DebugConfig.keepNodesInWorkspace,
+		logging = DebugConfig.logging,
 	}
 )
 
 -- ==============================================================================
--- DEBUG VISUAL (SOLO EN STUDIO)
+-- 2. CREAR Y SPAWNEAR NPCs
 -- ==============================================================================
 
-if game:GetService("RunService"):IsStudio() then
-	print("🐛 Activando debug...")
-	
-	-- Estadísticas del grafo
-	-- NPCSystem.DebugUtilities.FullDebug(navGraph, DEBUG_CONFIG)
-	
-	-- Visualización si está habilitada
-	if DEBUG_CONFIG.visualizeOnStartup then
-		navGraph:DebugDrawAll(DEBUG_CONFIG)
-	end
+local npcTemplate = game.ServerStorage:FindFirstChild("NPCTemplate")
+if not npcTemplate then
+	error("❌ No se encontró NPCTemplate en ServerStorage")
 end
 
+local npcManager = NPCAISystem.Manager.new()
+
+-- Inyectar logging config en NPCBaseConfig
+local npcConfigWithLogging = table.clone(NPCBaseConfig)
+npcConfigWithLogging.logging = DebugConfig.logging
+
+local spawnedNPCs = NPCAISystem.Setup.SpawnAllNPCs(
+	npcManager,
+	npcTemplate,
+	navGraph,
+	NPCSpawnList,
+	npcConfigWithLogging
+)
+
+npcManager:Start()
+
 -- ==============================================================================
--- REPORTE FINAL
+-- 3. REPORTE Y DEBUG (SOLO STUDIO)
 -- ==============================================================================
 
-print("\n" .. string.rep("=", 60))
-print("🎉 SISTEMA COMPLETAMENTE INICIALIZADO")
+NPCAISystem.DebugUtilities.PrintSystemReport(
+	npcManager,
+	navGraph,
+	spawnedNPCs,
+	NPCBaseConfig,
+	DebugConfig
+)
 
-navGraph:DebugPrint()
+if isStudio and DebugConfig.visualizeOnStartup then
+	NPCAISystem.DebugUtilities.DrawAll(navGraph, DebugConfig)
+end

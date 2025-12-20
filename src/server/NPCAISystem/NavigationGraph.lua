@@ -1,18 +1,31 @@
 local NavigationGraph = {}
 NavigationGraph.__index = NavigationGraph
 
-function NavigationGraph.new()
+function NavigationGraph.new(debugConfig)
 	local self = setmetatable({}, NavigationGraph)
 	self.nodes = {}
 	self.connections = {}
 
 	-- Spatial hashing (construir con BuildSpatialHash3D)
 	self.spatialGrid = nil
-	self.cellSizeX = 16  -- Tamaño fijo: 20 studs
+	self.cellSizeX = 16  -- Tamaño fijo: 16 studs
 	self.cellSizeY = 10  -- Tamaño fijo: 10 studs
-	self.cellSizeZ = 14  -- Tamaño fijo: 20 studs
+	self.cellSizeZ = 14  -- Tamaño fijo: 14 studs
+
+	-- Debug logging
+	debugConfig = debugConfig or {}
+	self.logFlags = {
+		nodeSearch = debugConfig.nodeSearch or false,
+		astar = debugConfig.astar or false,
+	}
 
 	return self
+end
+
+function NavigationGraph:Log(category, message)
+	if self.logFlags[category] then
+		print("[NavigationGraph][" .. category .. "] " .. message)
+	end
 end
 
 -- ==============================================================================
@@ -81,12 +94,9 @@ function NavigationGraph:LoadFromParts(partsFolder, shouldDestroyParts)
 				-- Guardar en memoria solo si es válido
 				self:AddNode(part.Name, part.Position, metadata)
 				table.insert(loadedNodes, part.Name)
-
-				print("📍 Nodo cargado: " .. part.Name)
 			else
 				-- Descartar nodo por colisión con geometría
 				table.insert(discardedNodes, part.Name)
-				warn("❌ Nodo descartado (colisión): " .. part.Name)
 			end
 		end
 	end
@@ -94,7 +104,6 @@ function NavigationGraph:LoadFromParts(partsFolder, shouldDestroyParts)
 	-- Destruir o transparentar las Parts
 	if shouldDestroyParts then
 		partsFolder:Destroy()
-		print("🗑️ Parts de nodos destruidas (ahora en memoria)")
 	else
 		-- Hacerlas transparentes para debug
 		for _, part in ipairs(partsFolder:GetChildren()) do
@@ -104,19 +113,15 @@ function NavigationGraph:LoadFromParts(partsFolder, shouldDestroyParts)
 				part.CanQuery = false
 			end
 		end
-		print("👻 Parts de nodos transparentes (modo debug)")
 	end
-	
-	-- Estadísticas de carga
-	print("\n📊 Resumen de carga de nodos:")
-	print("   ✅ Nodos válidos cargados: " .. #loadedNodes)
-	if #discardedNodes > 0 then
-		print("   ❌ Nodos descartados (colisión): " .. #discardedNodes)
-	end
-	print("   📦 Total en memoria: " .. #loadedNodes)
 
 	-- Construir spatial hash automáticamente después de cargar nodos
 	self:BuildSpatialHash3D()
+
+	-- Warn solo si hay nodos descartados
+	if #discardedNodes > 0 then
+		warn("NavigationGraph: " .. #discardedNodes .. " nodos descartados por colisión")
+	end
 
 	return loadedNodes
 end
@@ -172,7 +177,6 @@ end
 
 function NavigationGraph:AutoConnect(options)
 	options = options or {}
-	local mode = options.mode or "distance"
 	local maxDistance = options.maxDistance or 50
 	local useRaycast = options.useRaycast or false
 	local maxConnectionsPerNode = options.maxConnectionsPerNode or 6
@@ -211,7 +215,9 @@ function NavigationGraph:AutoConnect(options)
 			end
 		end
 
-		table.sort(candidates, function(a, b) return a.distance < b.distance end)
+		table.sort(candidates, function(a, b)
+			return a.distance < b.distance
+		end)
 
 		local connectionsForNode = 0
 		for _, candidate in ipairs(candidates) do
@@ -225,7 +231,6 @@ function NavigationGraph:AutoConnect(options)
 		end
 	end
 
-	print("🎯 Auto-conectados " .. connections .. " conexiones (\" .. mode .. \", max dist: " .. maxDistance .. ", raycast: " .. tostring(useRaycast) .. ")")
 	return connections
 end
 
@@ -237,8 +242,8 @@ function NavigationGraph:BuildSpatialHash3D()
 	self.spatialGrid = {}
 
 	-- Construir grid 3D usando el origen del workspace (0,0,0)
-	-- Celdas de 21×21×10 studs
-	for name, node in pairs(self.nodes) do
+	-- Celdas de 16x10x14 studs
+	for _, node in pairs(self.nodes) do
 		local cellX = math.floor(node.position.X / self.cellSizeX)
 		local cellY = math.floor(node.position.Y / self.cellSizeY)
 		local cellZ = math.floor(node.position.Z / self.cellSizeZ)
@@ -251,13 +256,6 @@ function NavigationGraph:BuildSpatialHash3D()
 		table.insert(self.spatialGrid[cellKey], node)
 	end
 
-	local cellCount = 0
-	for _ in pairs(self.spatialGrid) do cellCount = cellCount + 1 end
-
-	print("🔲 Spatial hash 3D construido:")
-	print("   Tamaño celda: " .. self.cellSizeX .. " × " .. self.cellSizeY .. " × " .. self.cellSizeZ .. " studs")
-	print("   Origen de referencia: Workspace (0, 0, 0)")
-	print("   Total celdas ocupadas: " .. cellCount)
 end
 
 -- ==============================================================================
@@ -267,9 +265,10 @@ end
 function NavigationGraph:GetNearestNode(position, options)
 	-- Si no hay spatial hash, usar búsqueda linear
 	if not self.spatialGrid then
+		self:Log("nodeSearch", "SpatialGrid nil, usando búsqueda linear")
 		return self:GetNearestNodeLinear(position)
 	end
-	
+
 	options = options or {}
 	local preferSameFloor = options.preferSameFloor or false
 	local currentFloor = options.floor
@@ -277,29 +276,31 @@ function NavigationGraph:GetNearestNode(position, options)
 	local cellX = math.floor(position.X / self.cellSizeX)
 	local cellY = math.floor(position.Y / self.cellSizeY)
 	local cellZ = math.floor(position.Z / self.cellSizeZ)
-	
+
 	local nearestNode = nil
 	local nearestSameFloor = nil
 	local shortestDistance = math.huge
 	local shortestSameFloorDistance = math.huge
-	
+	local nodesChecked = 0
+
 	-- Buscar en 3x3x3 grid (27 celdas vecinas)
 	for dx = -1, 1 do
 		for dy = -1, 1 do
 			for dz = -1, 1 do
 				local key = (cellX + dx) .. "," .. (cellY + dy) .. "," .. (cellZ + dz)
 				local nodesInCell = self.spatialGrid[key]
-				
+
 				if nodesInCell then
 					for _, node in ipairs(nodesInCell) do
+						nodesChecked = nodesChecked + 1
 						local distance = (node.position - position).Magnitude
-						
+
 						-- Mejor nodo en general
 						if distance < shortestDistance then
 							shortestDistance = distance
 							nearestNode = node
 						end
-						
+
 						-- Mejor nodo del mismo piso
 						if preferSameFloor and currentFloor then
 							if node.metadata.floor == currentFloor and distance < shortestSameFloorDistance then
@@ -312,12 +313,19 @@ function NavigationGraph:GetNearestNode(position, options)
 			end
 		end
 	end
-	
+
 	-- Preferir nodo del mismo piso si está razonablemente cerca
 	if preferSameFloor and nearestSameFloor and shortestSameFloorDistance < shortestDistance * 1.5 then
+		self:Log("nodeSearch", "Encontrado (mismo piso): " .. nearestSameFloor.name .. " (dist=" .. string.format("%.1f", shortestSameFloorDistance) .. ", checked=" .. nodesChecked .. ")")
 		return nearestSameFloor
 	end
-	
+
+	if nearestNode then
+		self:Log("nodeSearch", "Encontrado: " .. nearestNode.name .. " (dist=" .. string.format("%.1f", shortestDistance) .. ", checked=" .. nodesChecked .. ")")
+	else
+		self:Log("nodeSearch", "NO ENCONTRADO en celda " .. cellX .. "," .. cellY .. "," .. cellZ .. " (checked=" .. nodesChecked .. ")")
+	end
+
 	return nearestNode
 end
 
@@ -325,7 +333,7 @@ function NavigationGraph:GetNearestNodeLinear(position)
 	local nearestNode = nil
 	local shortestDistance = math.huge
 
-	for name, node in pairs(self.nodes) do
+	for _, node in pairs(self.nodes) do
 		local distance = (node.position - position).Magnitude
 		if distance < shortestDistance then
 			shortestDistance = distance
@@ -341,16 +349,30 @@ end
 -- ==============================================================================
 
 function NavigationGraph:GetPathBetweenNodes(startNode, endNode)
-	if not startNode or not endNode then return nil end
-	if startNode.name == endNode.name then return {endNode} end
+	if not startNode or not endNode then
+		self:Log("astar", "A* ABORTADO: nodos nil")
+		return nil
+	end
+	if startNode.name == endNode.name then
+		self:Log("astar", "A* TRIVIAL: mismo nodo")
+		return {endNode}
+	end
 
 	local openSet = {startNode}
 	local closedSet = {}
 	local cameFrom = {}
 	local gScore = {[startNode.name] = 0}
 	local fScore = {[startNode.name] = (startNode.position - endNode.position).Magnitude}
+	local iterations = 0
+	local maxIterations = 500 -- Prevenir loops infinitos
 
 	while #openSet > 0 do
+		iterations = iterations + 1
+		if iterations > maxIterations then
+			self:Log("astar", "A* TIMEOUT: " .. startNode.name .. " → " .. endNode.name .. " (>" .. maxIterations .. " iteraciones)")
+			return nil
+		end
+
 		table.sort(openSet, function(a, b)
 			return (fScore[a.name] or math.huge) < (fScore[b.name] or math.huge)
 		end)
@@ -363,6 +385,7 @@ function NavigationGraph:GetPathBetweenNodes(startNode, endNode)
 				current = cameFrom[current.name]
 				table.insert(path, 1, current)
 			end
+			self:Log("astar", "A* OK: " .. startNode.name .. " → " .. endNode.name .. " (" .. #path .. " nodos, " .. iterations .. " iter)")
 			return path
 		end
 
@@ -387,300 +410,8 @@ function NavigationGraph:GetPathBetweenNodes(startNode, endNode)
 		end
 	end
 
+	self:Log("astar", "A* FALLIDO: " .. startNode.name .. " → " .. endNode.name .. " (sin ruta, " .. iterations .. " iter, " .. #closedSet .. " explorados)")
 	return nil
-end
-
--- ==============================================================================
--- DEBUG VISUAL - NODOS
--- ==============================================================================
-
-function NavigationGraph:DebugDrawNodes(options)
-	options = options or {}
-	local color = options.color or Color3.fromRGB(0, 255, 0)
-	local size = options.size or 0.5
-	local transparency = options.transparency or 0.3
-	local showLabels = options.showLabels ~= false
-	
-	-- Limpiar debug anterior
-	local existingFolder = workspace:FindFirstChild("DEBUG_Nodes")
-	if existingFolder then existingFolder:Destroy() end
-	
-	local folder = Instance.new("Folder")
-	folder.Name = "DEBUG_Nodes"
-	folder.Parent = workspace
-	
-	local count = 0
-	
-	for name, node in pairs(self.nodes) do
-		-- Crear esfera para el nodo
-		local sphere = Instance.new("Part")
-		sphere.Name = name
-		sphere.Shape = Enum.PartType.Ball
-		sphere.Size = Vector3.new(size, size, size)
-		sphere.Position = node.position
-		sphere.Anchored = true
-		sphere.CanCollide = false
-		sphere.CanQuery = false
-		sphere.Color = color
-		sphere.Transparency = transparency
-		sphere.Material = Enum.Material.Neon
-		sphere.Parent = folder
-		
-		-- Etiqueta
-		if showLabels then
-			local billboard = Instance.new("BillboardGui")
-			billboard.Size = UDim2.new(0, 100, 0, 40)
-			billboard.StudsOffset = Vector3.new(0, 1, 0)
-			billboard.AlwaysOnTop = true
-			billboard.Parent = sphere
-			
-			local label = Instance.new("TextLabel")
-			label.Size = UDim2.new(1, 0, 1, 0)
-			label.BackgroundTransparency = 1
-			label.Text = name
-			label.TextColor3 = Color3.new(1, 1, 1)
-			label.TextScaled = true
-			label.Font = Enum.Font.SourceSansBold
-			label.TextStrokeTransparency = 0.5
-			label.Parent = billboard
-			
-			-- Mostrar metadata si existe
-			if node.metadata and node.metadata.floor ~= 0 then
-				local floorLabel = Instance.new("TextLabel")
-				floorLabel.Size = UDim2.new(1, 0, 0.4, 0)
-				floorLabel.Position = UDim2.new(0, 0, 0.6, 0)
-				floorLabel.BackgroundTransparency = 1
-				floorLabel.Text = "Floor " .. node.metadata.floor
-				floorLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
-				floorLabel.TextScaled = true
-				floorLabel.Font = Enum.Font.SourceSans
-				floorLabel.TextStrokeTransparency = 0.5
-				floorLabel.Parent = billboard
-			end
-		end
-		
-		count = count + 1
-	end
-	
-	print("✅ Debug: " .. count .. " nodos visualizados")
-	return folder
-end
-
--- ==============================================================================
--- DEBUG VISUAL - CELDAS
--- ==============================================================================
-
-function NavigationGraph:DebugDrawCells(options)
-	if not self.spatialGrid then
-		warn("⚠️ Spatial grid no construido")
-		return
-	end
-	
-	options = options or {}
-	local color = options.color or Color3.fromRGB(100, 200, 255)
-	local transparency = options.transparency or 0.85
-	local wireframe = options.wireframe ~= false
-	local showLabels = options.showLabels ~= false
-	
-	-- Limpiar debug anterior
-	local existingFolder = workspace:FindFirstChild("DEBUG_Cells")
-	if existingFolder then existingFolder:Destroy() end
-	
-	local folder = Instance.new("Folder")
-	folder.Name = "DEBUG_Cells"
-	folder.Parent = workspace
-	
-	local count = 0
-	
-	for cellKey, nodes in pairs(self.spatialGrid) do
-		-- Parsear índices de celda desde la key
-		local coords = string.split(cellKey, ",")
-		local cellX = tonumber(coords[1])
-		local cellY = tonumber(coords[2])
-		local cellZ = tonumber(coords[3])
-
-		-- Calcular posición central EXACTA de la celda desde su índice
-		-- Fórmula: centro = índice × tamaño + tamaño/2 (desde origen workspace 0,0,0)
-		local centerPos = Vector3.new(
-			cellX * self.cellSizeX + self.cellSizeX / 2,
-			cellY * self.cellSizeY + self.cellSizeY / 2,
-			cellZ * self.cellSizeZ + self.cellSizeZ / 2
-		)
-
-		local cellSize = Vector3.new(self.cellSizeX, self.cellSizeY, self.cellSizeZ)
-		
-		-- Crear Part para la celda
-		local cellPart = Instance.new("Part")
-		cellPart.Name = "Cell_" .. cellKey
-		cellPart.Size = cellSize
-		cellPart.Position = centerPos
-		cellPart.Anchored = true
-		cellPart.CanCollide = false
-		cellPart.CanQuery = false
-		cellPart.Color = color
-		cellPart.Material = Enum.Material.SmoothPlastic
-		
-		if wireframe then
-			-- Modo wireframe (solo bordes)
-			cellPart.Transparency = 1
-			
-			-- Crear SelectionBox para mostrar bordes
-			local selectionBox = Instance.new("SelectionBox")
-			selectionBox.Adornee = cellPart
-			selectionBox.LineThickness = 0.05
-			selectionBox.Color3 = color
-			selectionBox.Transparency = 0.3
-			selectionBox.Parent = cellPart
-		else
-			-- Modo sólido
-			cellPart.Transparency = transparency
-		end
-		
-		cellPart.Parent = folder
-		
-		-- Etiqueta con información
-		if showLabels then
-			local billboard = Instance.new("BillboardGui")
-			billboard.Size = UDim2.new(0, 120, 0, 50)
-			billboard.StudsOffset = Vector3.new(0, cellSize.Y / 2 + 1, 0)
-			billboard.AlwaysOnTop = true
-			billboard.Parent = cellPart
-			
-			local label = Instance.new("TextLabel")
-			label.Size = UDim2.new(1, 0, 1, 0)
-			label.BackgroundTransparency = 1
-			label.Text = cellKey .. "\n(" .. #nodes .. " nodos)"
-			label.TextColor3 = Color3.new(1, 1, 1)
-			label.TextScaled = true
-			label.Font = Enum.Font.SourceSansBold
-			label.TextStrokeTransparency = 0.5
-			label.Parent = billboard
-		end
-		
-		count = count + 1
-	end
-	
-	print("✅ Debug: " .. count .. " celdas visualizadas")
-	return folder
-end
-
--- ==============================================================================
--- DEBUG VISUAL - CONEXIONES
--- ==============================================================================
-
-function NavigationGraph:DebugDrawConnections(options)
-	options = options or {}
-	local color = options.color or Color3.fromRGB(153, 202, 255)
-	local width = options.width or 0.1
-	
-	-- Limpiar debug anterior
-	local existingFolder = workspace:FindFirstChild("DEBUG_Connections")
-	if existingFolder then existingFolder:Destroy() end
-	
-	local folder = Instance.new("Folder")
-	folder.Name = "DEBUG_Connections"
-	folder.Parent = workspace
-	
-	local count = 0
-	local drawnConnections = {}
-	
-	for name, node in pairs(self.nodes) do
-		for _, connectedName in ipairs(node.connections) do
-			-- Evitar dibujar la misma conexión dos veces
-			local connectionKey1 = name .. "→" .. connectedName
-			local connectionKey2 = connectedName .. "→" .. name
-			
-			if not drawnConnections[connectionKey1] and not drawnConnections[connectionKey2] then
-				local connectedNode = self.nodes[connectedName]
-				
-				if connectedNode then
-					-- Crear attachments en posiciones de los nodos
-					local att0 = Instance.new("Attachment")
-					att0.WorldPosition = node.position
-					att0.Parent = folder
-					
-					local att1 = Instance.new("Attachment")
-					att1.WorldPosition = connectedNode.position
-					att1.Parent = folder
-					
-					-- Crear beam entre ellos
-					local beam = Instance.new("Beam")
-					beam.Attachment0 = att0
-					beam.Attachment1 = att1
-					beam.Color = ColorSequence.new(color)
-					beam.Width0 = width
-					beam.Width1 = width
-					beam.FaceCamera = true
-					beam.Parent = att0
-					
-					drawnConnections[connectionKey1] = true
-					count = count + 1
-				end
-			end
-		end
-	end
-	
-	print("✅ Debug: " .. count .. " conexiones visualizadas")
-	return folder
-end
-
--- ==============================================================================
--- DEBUG VISUAL - TODO
--- ==============================================================================
-
-function NavigationGraph:DebugDrawAll(options)
-	options = options or {}
-	
-	print("\n" .. string.rep("=", 60))
-	print("🎨 VISUALIZACIÓN COMPLETA DEL GRAFO")
-	print(string.rep("=", 60))
-	
-	if options.showNodes ~= false then
-		self:DebugDrawNodes({
-			color = options.nodeColor,
-			size = options.nodeSize,
-			transparency = options.nodeTransparency,
-			showLabels = true
-		})
-	end
-	
-	if options.showCells ~= false then
-		self:DebugDrawCells({
-			color = options.cellColor,
-			transparency = options.cellTransparency,
-			wireframe = options.cellWireframe,
-			showLabels = true
-		})
-	end
-	
-	if options.showConnections ~= false then
-		self:DebugDrawConnections({
-			color = options.connectionColor,
-			width = options.connectionWidth
-		})
-	end
-	
-	print(string.rep("=", 60) .. "\n")
-end
-
-function NavigationGraph:DebugClearAll()
-	local folders = {
-		"DEBUG_Nodes",
-		"DEBUG_Cells",
-		"DEBUG_Connections",
-		"NavigationDebug"
-	}
-	
-	local cleared = 0
-	for _, folderName in ipairs(folders) do
-		local folder = workspace:FindFirstChild(folderName)
-		if folder then
-			folder:Destroy()
-			cleared = cleared + 1
-		end
-	end
-	
-	print("🧹 Debug limpiado (" .. cleared .. " folders removidos)")
 end
 
 -- ==============================================================================
@@ -689,7 +420,7 @@ end
 
 function NavigationGraph:GetNodesCount()
 	local count = 0
-	for _, node in pairs(self.nodes) do
+	for _ in pairs(self.nodes) do
 		count += 1
 	end
 	return count
@@ -703,25 +434,5 @@ function NavigationGraph:GetConnectionCount()
 	return math.floor(count / 2)
 end
 
-function NavigationGraph:DebugPrint()
-	print("📊 === NAVIGATION GRAPH DEBUG ===")
-	print("Total nodos: " .. self:GetNodesCount())
-	print("Total conexiones: " .. self:GetConnectionCount())
-
-	-- Estadísticas del spatial hash
-	if self.spatialGrid then
-		local cellCount = 0
-		local totalNodesInCells = 0
-		for _, nodes in pairs(self.spatialGrid) do
-			cellCount = cellCount + 1
-			totalNodesInCells = totalNodesInCells + #nodes
-		end
-		print("🔲 Spatial Hash:")
-		print("   Celdas ocupadas: " .. cellCount)
-		print("   Nodos por celda (promedio): " .. string.format("%.1f", totalNodesInCells / cellCount))
-
-		print("================================")
-	end
-end
 
 return NavigationGraph
