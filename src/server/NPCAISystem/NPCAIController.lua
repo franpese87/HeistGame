@@ -6,6 +6,7 @@ local AIState = {
 	OBSERVING = "Observing",
 	CHASING = "Chasing",
 	ATTACKING = "Attacking",
+	INVESTIGATING = "Investigating", -- Nuevo estado
 	RETURNING = "Returning"
 }
 
@@ -156,11 +157,13 @@ function NPCAIController:Update(_deltaTime )
 	if self.currentState == AIState.PATROLLING then
 		self:UpdatePatrolling()
 	elseif self.currentState == AIState.OBSERVING then
-		self:UpdateObserving()  -- 🆕 Nuevo estado
+		self:UpdateObserving()
 	elseif self.currentState == AIState.CHASING then
 		self:UpdateChasing()
 	elseif self.currentState == AIState.ATTACKING then
 		self:UpdateAttacking()
+	elseif self.currentState == AIState.INVESTIGATING then
+		self:UpdateInvestigating()
 	elseif self.currentState == AIState.RETURNING then
 		self:UpdateReturning()
 	end
@@ -269,7 +272,6 @@ function NPCAIController:CheckOcclusion(origin, direction, targetPart)
 	return canSee
 end
 
--- fperease
 function NPCAIController:ProcessDetectionResult(nearestTarget, currentTime)
 	-- CONFIGURACIÓN DEL BUFFER
 	-- Tiempo (en segundos) que el NPC "recuerda" haberte visto aunque el raycast falle.
@@ -311,8 +313,8 @@ function NPCAIController:ProcessDetectionResult(nearestTarget, currentTime)
 				self.target = nearestTarget
 				self:Log("detection", "TARGET CONFIRMADO: " .. nearestTarget.Name)
 
-				if self.currentState == "Patrolling" or self.currentState == "Observing" then
-					self:ChangeState("Chasing")
+				if self.currentState == AIState.PATROLLING or self.currentState == AIState.OBSERVING or self.currentState == AIState.RETURNING or self.currentState == AIState.INVESTIGATING then
+					self:ChangeState(AIState.CHASING)
 				end
 			end
 		end
@@ -349,12 +351,18 @@ function NPCAIController:ProcessDetectionResult(nearestTarget, currentTime)
 
 			if timeLost >= self.loseTargetTime then
 				self:Log("detection", "TARGET PERDIDO tras " .. string.format("%.1f", timeLost) .. "s")
+				
+				-- Guardar la última posición ANTES de limpiar el target
+				if self.target and self.target:FindFirstChild("HumanoidRootPart") then
+					self.lastSeenPosition = self.target:FindFirstChild("HumanoidRootPart").Position
+				end
+
 				self.target = nil
 				self.lostDetectionTime = nil
 				self.detectionTimeAccumulator = nil
 
-				if self.currentState == "Chasing" or self.currentState == "Attacking" then
-					self:ChangeState("Returning")
+				if self.currentState == AIState.CHASING or self.currentState == AIState.ATTACKING then
+					self:ChangeState(AIState.INVESTIGATING)
 				end
 			end
 		end
@@ -776,6 +784,62 @@ function NPCAIController:PerformAttack()
 end
 
 -- ==============================================================================
+-- INVESTIGATING (NUEVO ESTADO)
+-- ==============================================================================
+
+function NPCAIController:EnterInvestigating()
+	self:Log("stateChanges", "Iniciando investigación en la última posición conocida.")
+	self.investigationStartTime = tick()
+	self.investigationDuration = 7 -- Duración de la búsqueda en segundos
+	self.humanoid.AutoRotate = false -- Para controlar la rotación manualmente
+end
+
+function NPCAIController:UpdateInvestigating()
+	-- GLOBAL TIMEOUT: Si la investigación dura demasiado, rendirse.
+	if tick() - self.investigationStartTime > self.investigationDuration then
+		self:Log("stateChanges", "Investigación terminada por timeout global.")
+		self:ChangeState(AIState.RETURNING)
+		return
+	end
+
+	-- Interrupción: Si detectamos target, volver a CHASING
+	if self.target then
+		self:ChangeState(AIState.CHASING)
+		return
+	end
+
+	-- Moverse hacia el punto de investigación
+	if self.lastSeenPosition then
+		local distanceToLastSeen = (self.rootPart.Position - self.lastSeenPosition).Magnitude
+
+		if distanceToLastSeen > 3 then
+			self.humanoid:MoveTo(self.lastSeenPosition)
+			if self.animator then self.animator:PlayAnimation("walk") end
+		else
+			-- Llegamos al punto, "buscar"
+			self.humanoid:MoveTo(self.rootPart.Position)
+			if self.animator then self.animator:PlayAnimation("idle") end
+
+			-- Lógica de búsqueda: mirar a los lados
+			local timeInState = tick() - self.stateStartTime
+			local lookAngle = math.sin(timeInState * 2) * 45
+			local lookDirection = self.rootPart.CFrame.LookVector
+			local newCFrame = CFrame.lookAt(self.rootPart.Position, self.rootPart.Position + lookDirection) * CFrame.Angles(0, math.rad(lookAngle), 0)
+			self.rootPart.CFrame = self.rootPart.CFrame:Lerp(newCFrame, 0.1)
+		end
+	else
+		-- Sin posición para investigar, volver a la ruta.
+		self:Log("stateChanges", "No hay posición para investigar, volviendo a la ruta.")
+		self:ChangeState(AIState.RETURNING)
+	end
+end
+
+function NPCAIController:ExitInvestigating()
+	self.investigationStartTime = nil
+	self.humanoid.AutoRotate = true -- Restaurar la auto-rotación
+end
+
+-- ==============================================================================
 -- RETURNING (Arquitectura Enter/Update separada)
 -- ==============================================================================
 
@@ -885,6 +949,11 @@ local STATE_VISUALS = {
 		text = "ATTACKING",
 		color = Color3.fromRGB(255, 100, 0),  -- Naranja
 	},
+	[AIState.INVESTIGATING] = {
+		emoji = "❓",
+		text = "INVESTIGATING",
+		color = Color3.fromRGB(255, 165, 0), -- Naranja claro
+	},
 	[AIState.RETURNING] = {
 		emoji = "🔄",
 		text = "RETURNING",
@@ -951,6 +1020,8 @@ function NPCAIController:ChangeState(newState)
 	-- EXIT del estado anterior
 	if self.currentState == AIState.OBSERVING then
 		self:ExitObserving()
+	elseif self.currentState == AIState.INVESTIGATING then
+		self:ExitInvestigating()
 	elseif self.currentState == AIState.RETURNING then
 		self:ExitReturning()
 	end
@@ -977,6 +1048,9 @@ function NPCAIController:ChangeState(newState)
 
 	elseif newState == AIState.OBSERVING then
 		self:EnterObserving()
+	
+	elseif newState == AIState.INVESTIGATING then
+		self:EnterInvestigating()
 
 	elseif newState == AIState.CHASING then
 		self.currentPath = nil
