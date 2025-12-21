@@ -28,26 +28,34 @@ return {
 	connectionWidth = 0.1,
 
 	-- ==============================================================================
+	-- DEBUG VISUAL (SENSORS)
+	-- ==============================================================================
+	visuals = {
+		showVisionRays = true,   -- Muestra las líneas de visión (Verde/Rojo)
+		showNoiseSpheres = true, -- Muestra esferas donde se generan ruidos
+	},
+
+	-- ==============================================================================
 	-- LOGGING DE NPC AI (Console Debug)
 	-- Activar solo las categorías necesarias para debugging
 	-- ==============================================================================
 	logging = {
 		-- Transiciones de estado (Patrolling → Chasing → Returning, etc.)
-		stateChanges = false,
+		stateChanges = true,
 
 		-- Sistema de detección (accumulator, coyote time, target acquisition/loss)
-		detection = false,
+		detection = true,
 
 		-- Cálculo y seguimiento de rutas (pathfinding A*, seguimiento de nodos)
-		pathfinding = false,
+		pathfinding = true,
 
 		-- Estado RETURNING específico (bug conocido: navegación al volver a patrulla)
-		returning = false,
+		returning = true,
 
 		-- Búsqueda de nodos en el grafo (GetNearestNode, spatial hash)
-		nodeSearch = false,
+		nodeSearch = true,
 
 		-- Algoritmo A* detallado (iteraciones, nodos explorados)
-		astar = false,
+		astar = true,
 	},
 }

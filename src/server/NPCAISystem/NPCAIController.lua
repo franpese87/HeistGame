@@ -1,12 +1,17 @@
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
+local NoiseService = require(script.Parent.NoiseService)
+local VisionSensor = require(script.Parent.Components.VisionSensor)
+local CombatSystem = require(script.Parent.Components.CombatSystem)
+local HearingSensor = require(script.Parent.Components.HearingSensor)
+local DebugConfig = require(script.Parent.Parent.Config.DebugConfig)
 
 local AIState = {
 	PATROLLING = "Patrolling",
 	OBSERVING = "Observing",
 	CHASING = "Chasing",
 	ATTACKING = "Attacking",
-	INVESTIGATING = "Investigating", -- Nuevo estado
+	INVESTIGATING = "Investigating",
 	RETURNING = "Returning"
 }
 
@@ -30,57 +35,41 @@ function NPCAIController.new(npc, navigationGraph, config)
 		return nil
 	end
 
-	-- Configuración
+	-- Configuración General
 	config = config or {}
-	self.detectionRange = config.detectionRange or 50
-	self.attackRange = config.attackRange or 5
-	self.loseTargetTime = config.loseTargetTime or 3
 	self.patrolSpeed = config.patrolSpeed or 16
 	self.chaseSpeed = config.chaseSpeed or 24
 	self.patrolWaitTime = config.patrolWaitTime or 2
-	self.attackCooldown = config.attackCooldown or 1
-	self.attackDamage = config.attackDamage or 10
-	self.visionHeight = config.visionHeight or 2
-
+	
 	-- Navegación
 	self.navigationMode = config.navigationMode or "hybrid"
 	self.graphChaseDistance = config.graphChaseDistance or 20
 	self.pathRecalculateInterval = config.pathRecalculateInterval or 1.0
+	self.nodeTimeout = 4
 
-	-- Sistema de cono de visión
-	self.observationConeRays = config.observationConeRays or 11
-	self.observationConeAngle = config.observationConeAngle or 90
-	self.minDetectionTime = config.minDetectionTime or 0.3
-	self.coneVisualDuration = config.coneVisualDuration or 0.1
-
-	-- 🆕 Sistema de indicadores de estado (debug visual)
-	self.showStateIndicator = config.showStateIndicator or false
-	self.stateIndicatorOffset = config.stateIndicatorOffset or 4
-	self.stateIndicator = nil
-
-	-- Sistema de observación (ahora como estado independiente)
+	-- Observación
 	self.observationAngles = config.observationAngles or {-45, 0, 45, 0}
 	self.observationTimePerAngle = config.observationTimePerAngle or 1.0
-	self.currentObservationIndex = 1
-	self.observationStartTime = 0
-	self.originalCFrame = nil
-	self.targetObservationCFrame = nil
-	self.currentRotationTween = nil
-	self.rotationTweenInfo = TweenInfo.new(
-		self.observationTimePerAngle * 0.3,
-		Enum.EasingStyle.Sine,
-		Enum.EasingDirection.InOut
-	)
+	self.rotationTweenInfo = TweenInfo.new(self.observationTimePerAngle * 0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+
+	-- 🆕 COMPONENTES (Ojos, Músculos y Oídos)
+	self.visionSensor = VisionSensor.new(npc, config)
+	self.combatSystem = CombatSystem.new(npc, config)
+	self.hearingSensor = HearingSensor.new(npc, config)
+	
+	-- Configuración de Debug visual del sensor
+	if DebugConfig.visuals then
+		self.visionSensor:SetDebug(DebugConfig.visuals.showVisionRays, { showRaycast = DebugConfig.visuals.showVisionRays })
+	end
 
 	-- Estado
 	self.currentState = AIState.PATROLLING
 	self.target = nil
 	self.lastSeenPosition = nil
-	self.lastSeenTime = 0
 	self.isActive = true
 	self.stateStartTime = tick()
-	self.lastAttackTime = 0
 	self.lastMoveCommand = 0
+	self.timeStartedMovingToNode = 0
 
 	-- Patrullaje
 	self.patrolNodes = config.patrolNodes or {}
@@ -93,21 +82,8 @@ function NPCAIController.new(npc, navigationGraph, config)
 	self.lastPathCalculation = 0
 	self.targetLastPosition = nil
 	
-	-- fperease
-	self.raycastParams = RaycastParams.new()
-	self.raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	self.raycastParams.FilterDescendantsInstances = {self.npc}
-
-	-- Detección simplificada (sin gracia)
-	self.detectionFrameCount = nil
-	self.lostDetectionTime = nil
-
-	-- Debug visual (raycast)
-	self.debugEnabled = false
-	self.debugConfig = {}
-
-	-- Debug logging (console)
-	local loggingConfig = config.logging or {}
+	-- Debug logging
+	local loggingConfig = config.logging or DebugConfig.logging or {}
 	self.logFlags = {
 		stateChanges = loggingConfig.stateChanges or false,
 		detection = loggingConfig.detection or false,
@@ -119,14 +95,16 @@ function NPCAIController.new(npc, navigationGraph, config)
 	local NPCAnimator = require(script.Parent.NPCAnimator)
 	self.animator = NPCAnimator.new(self.humanoid)
 
-	-- Iniciar patrullaje
-	if #self.patrolNodes > 0 then
-		self:MoveToNextPatrolNode()
-	end
-
-	-- 🆕 Crear indicador de estado si está habilitado
+	-- 🆕 Sistema de indicadores de estado
+	self.showStateIndicator = config.showStateIndicator or false
+	self.stateIndicatorOffset = config.stateIndicatorOffset or 4
 	if self.showStateIndicator then
 		self:CreateStateIndicator()
+	end
+
+	-- Iniciar
+	if #self.patrolNodes > 0 then
+		self:MoveToNextPatrolNode()
 	end
 
 	return self
@@ -146,13 +124,13 @@ end
 -- MAIN UPDATE LOOP
 -- ==============================================================================
 
-function NPCAIController:Update(_deltaTime )
+function NPCAIController:Update(_deltaTime)
 	if not self.isActive or not self.humanoid or self.humanoid.Health <= 0 then
 		self.isActive = false
 		return
 	end
 
-	self:DetectTargets()
+	self:UpdateSenses() -- 🆕 Fase 1: Percibir
 
 	if self.currentState == AIState.PATROLLING then
 		self:UpdatePatrolling()
@@ -170,261 +148,70 @@ function NPCAIController:Update(_deltaTime )
 end
 
 -- ==============================================================================
--- DETECTION SYSTEM (CONE RAYCAST - SIN GRACIA)
+-- SENSORY SYSTEM (REFACTORIZADO)
 -- ==============================================================================
 
-function NPCAIController:DetectTargets()
-	local nearestTarget = nil
-	local nearestDistance = self.detectionRange
-	local currentTime = tick()
+function NPCAIController:UpdateSenses()
+	-- 1. VISIÓN
+	local currentTarget, lastPos, events = self.visionSensor:Scan()
 
-	for _, player in ipairs(game.Players:GetPlayers()) do
-		if player.Character then
-			local targetRoot = player.Character:FindFirstChild("HumanoidRootPart")
-			local targetHumanoid = player.Character:FindFirstChildOfClass("Humanoid")
+	if currentTarget then
+		self.target = currentTarget
+	end
+	
+	if lastPos then
+		self.lastSeenPosition = lastPos
+	end
 
-			if targetRoot and targetHumanoid and targetHumanoid.Health > 0 then
-				-- ✅ OPTIMIZACIÓN: Verificar distancia primero (barato)
-				local distance = (self.rootPart.Position - targetRoot.Position).Magnitude
-
-				if distance < nearestDistance then
-					-- ✅ DETECCIÓN: Disparar cono de raycast
-					if self:HasLineOfSightWithCone(targetRoot) then
-						nearestDistance = distance
-						nearestTarget = player.Character
-						self.lastSeenTime = currentTime
-					end
-				end
-			end
+	if events.TargetConfirmed then
+		self:Log("detection", "TARGET CONFIRMADO: " .. currentTarget.Name)
+		
+		-- Prioridad absoluta: Si vemos a alguien y no estamos ya atacando/persiguiendo, cambiar.
+		if self.currentState ~= AIState.CHASING and self.currentState ~= AIState.ATTACKING then
+			self:ChangeState(AIState.CHASING)
 		end
 	end
 
-	self:ProcessDetectionResult(nearestTarget, currentTime)
-end
-
--- |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| --
--- |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| --
--- |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| --
-
--- fperease
-function NPCAIController:HasLineOfSightWithCone(targetPart)
-	local origin = self.rootPart.Position + Vector3.new(0, self.visionHeight, 0)
-	local targetPos = targetPart.Position
-	local directionVector = (targetPos - origin)
-	local distance = directionVector.Magnitude
-
-	-- 1. CHEQUEO DE DISTANCIA (Rango máximo)
-	if distance > self.detectionRange then 
-		return false 
-	end
-
-	-- 2. CÁLCULO DE ÁNGULO HORIZONTAL (Planar Check)
-	-- Aplanamos los vectores anulando la altura (Y = 0)
-	-- Esto convierte el cono en una "rebanada de pizza" infinita hacia arriba y abajo
-	local lookVectorFlat = (self.rootPart.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
-	local directionFlat = (directionVector * Vector3.new(1, 0, 1)).Unit
-
-	-- Calculamos el ángulo solo en el plano del suelo
-	local dotProduct = lookVectorFlat:Dot(directionFlat)
-	local halfAngleRad = math.rad(self.observationConeAngle / 2)
-	local threshold = math.cos(halfAngleRad)
-
-	-- Si estás detrás o a los lados (fuera del ángulo horizontal), no te ve.
-	-- Esto PRESERVA EL SIGILO por la espalda.
-	if dotProduct < threshold then
-		return false 
-	end
-
-	-- 3. RAYCAST DE OCLUSIÓN (Físico)
-	-- Aquí sí usamos 3D. Si hay un muro, una caja, o un techo entre los dos, el rayo fallará.
-	return self:CheckOcclusion(origin, directionVector, targetPart)
-end
-
--- fperease
--- Función auxiliar (se mantiene igual, pero asegúrate de tenerla)
-function NPCAIController:CheckOcclusion(origin, direction, targetPart)
-	if not self.raycastParams then
-		self.raycastParams = RaycastParams.new()
-		self.raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-		self.raycastParams.FilterDescendantsInstances = {self.npc}
-	end
-
-	local result = workspace:Raycast(origin, direction, self.raycastParams)
-	local canSee = false
-
-	if result and result.Instance:IsDescendantOf(targetPart.Parent) then
-		canSee = true
-	end
-
-	-- DEBUG VISUAL
-	if self.debugEnabled and self.debugConfig.showRaycast then
-		-- Verde = Te veo claro | Rojo = Sé que estás ahí, pero algo te tapa
-		local debugColor = canSee and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
-		local DebugUtilities = require(script.Parent.DebugUtilities)
-		DebugUtilities.VisualizeRaycast(origin, direction, result, {
-			hitColor = debugColor,
-			missColor = debugColor,
-			duration = 0.1,
-			width = 0.1
-		})
-	end
-
-	return canSee
-end
-
-function NPCAIController:ProcessDetectionResult(nearestTarget, currentTime)
-	-- CONFIGURACIÓN DEL BUFFER
-	-- Tiempo (en segundos) que el NPC "recuerda" haberte visto aunque el raycast falle.
-	-- 0.5s es ideal: elimina el parpadeo pero no permite que el jugador cruce pasillos sin ser visto.
-	local COYOTE_TIME = 0.5 
-
-	-- Calcular delta time
-	local deltaTime = 0
-	if self.lastDetectionUpdate then
-		deltaTime = currentTime - self.lastDetectionUpdate
-	else
-		deltaTime = 0.03 
-	end
-	self.lastDetectionUpdate = currentTime
-
-	-- 🧠 CÁLCULO DE "VISIÓN EFECTIVA"
-	-- El NPC te ve si el Raycast acierta (nearestTarget) O SI acertó hace menos de 0.5s (Coyote Time)
-	local timeSinceLastSight = currentTime - (self.lastSeenTime or 0)
-	local inCoyoteTime = timeSinceLastSight < COYOTE_TIME
-
-	-- ¿Estamos viendo al objetivo? (Física o Mentalmente)
-	local isDetecting = nearestTarget ~= nil
-
-	------------------------------------------------------------------------
-	-- CASO 1: TE ESTOY VIENDO (Físicamente)
-	------------------------------------------------------------------------
-	if isDetecting then
-		-- INICIO DE DETECCIÓN
-		if not self.detectionTimeAccumulator then
-			self.detectionTimeAccumulator = 0
-		end
-
-		-- Sumar tiempo
-		self.detectionTimeAccumulator = self.detectionTimeAccumulator + deltaTime
-
-		-- CONFIRMACIÓN
-		if self.detectionTimeAccumulator >= self.minDetectionTime then
-			if not self.target then
-				self.target = nearestTarget
-				self:Log("detection", "TARGET CONFIRMADO: " .. nearestTarget.Name)
-
-				if self.currentState == AIState.PATROLLING or self.currentState == AIState.OBSERVING or self.currentState == AIState.RETURNING or self.currentState == AIState.INVESTIGATING then
-					self:ChangeState(AIState.CHASING)
-				end
-			end
-		end
-
-		-- Reseteamos temporizador de pérdida
-		self.lostDetectionTime = nil
-
-		------------------------------------------------------------------------
-		-- CASO 2: EL RAYCAST FALLÓ, PERO ESTOY EN "COYOTE TIME" (Buffer)
-		-- No sumamos ni restamos detección - "congelamos" la barra de progreso
-		------------------------------------------------------------------------
-
-		------------------------------------------------------------------------
-		-- CASO 3: REALMENTE TE PERDÍ (Fuera de Buffer)
-		------------------------------------------------------------------------
-	elseif not (inCoyoteTime and self.detectionTimeAccumulator and self.detectionTimeAccumulator > 0) then
-		-- Reset rápido de acumulación
-		if self.detectionTimeAccumulator and self.detectionTimeAccumulator > 0 then
-			-- Penalización (baja la barra)
-			self.detectionTimeAccumulator = self.detectionTimeAccumulator - (deltaTime * 2)
-
-			if self.detectionTimeAccumulator <= 0 then
-				self.detectionTimeAccumulator = nil
-			end
-		end
-
-		-- Sistema de olvidar target confirmado (Memoria a largo plazo)
-		if self.target then
-			if not self.lostDetectionTime then
-				self.lostDetectionTime = currentTime
-			end
-
-			local timeLost = currentTime - self.lostDetectionTime
-
-			if timeLost >= self.loseTargetTime then
-				self:Log("detection", "TARGET PERDIDO tras " .. string.format("%.1f", timeLost) .. "s")
-				
-				-- Guardar la última posición ANTES de limpiar el target
-				if self.target and self.target:FindFirstChild("HumanoidRootPart") then
-					self.lastSeenPosition = self.target:FindFirstChild("HumanoidRootPart").Position
-				end
-
-				self.target = nil
-				self.lostDetectionTime = nil
-				self.detectionTimeAccumulator = nil
-
-				if self.currentState == AIState.CHASING or self.currentState == AIState.ATTACKING then
-					self:ChangeState(AIState.INVESTIGATING)
-				end
-			end
+	if events.TargetLost then
+		self:Log("detection", "TARGET PERDIDO (Olvido total)")
+		self.target = nil
+		
+		-- Si estábamos ocupados con el target, ahora pasamos a investigar su última posición
+		if self.currentState == AIState.CHASING or self.currentState == AIState.ATTACKING then
+			self:ChangeState(AIState.INVESTIGATING)
 		end
 	end
-end
 
--- |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| --
--- |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| --
--- |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| --
-
-function NPCAIController:VisualizeObservationCone(origin, rayHits)
-	for _, ray in ipairs(rayHits) do
-		local endPoint = origin + ray.direction
-
-		-- Color: Verde si detectó jugador, Rojo si bloqueado, Verde claro si libre
-		local color = Color3.fromRGB(0, 200, 0) -- Default: Verde claro (libre)
-		if ray.result then
-			color = ray.hit and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+	-- 2. OÍDO (Nueva implementación)
+	local heardNoisePos = self.hearingSensor:CheckForNoise()
+	if heardNoisePos then
+		-- Solo reaccionamos al ruido si NO estamos ocupados (Prioridad baja vs visión)
+		if self.currentState == AIState.PATROLLING or self.currentState == AIState.OBSERVING or self.currentState == AIState.RETURNING then
+			self:Log("detection", "Ruido oído en " .. tostring(heardNoisePos))
+			self.lastSeenPosition = heardNoisePos
+			self:ChangeState(AIState.INVESTIGATING)
 		end
-
-		local line = Instance.new("LineHandleAdornment")
-		line.Adornee = workspace.Terrain
-		line.Color3 = color
-		line.Length = ray.direction.Magnitude
-		line.Thickness = 3
-		line.Transparency = 0.5
-		line.AlwaysOnTop = true
-		line.ZIndex = 1
-		line.CFrame = CFrame.new(origin, endPoint)
-		line.Parent = workspace.Terrain
-
-		Debris:AddItem(line, self.coneVisualDuration)
 	end
 end
 
 -- ==============================================================================
--- PATROLLING (SIMPLIFICADO - SOLO NAVEGACIÓN)
+-- PATROLLING
 -- ==============================================================================
 
 function NPCAIController:UpdatePatrolling()
 	self.humanoid.WalkSpeed = self.patrolSpeed
+	if self.animator then self.animator:PlayAnimation("walk") end
 
-	-- 🆕 Animación de caminar
-	if self.animator then
-		self.animator:PlayAnimation("walk")
-	end
+	-- Interrupciones por visión ahora manejadas en UpdateSenses()
 
-	if self.target then
-		self:ChangeState(AIState.CHASING)
-		return
-	end
-
-	-- Navegación simple hacia el nodo
+	-- Navegación simple
 	if #self.patrolNodes > 0 then
 		local targetNode = self.patrolNodes[self.currentPatrolIndex]
 		local distance = (self.rootPart.Position - targetNode.Position).Magnitude
 
 		if distance < 3 then
-			-- Llegamos al nodo → Cambiar a OBSERVING
 			self:ChangeState(AIState.OBSERVING)
 		else
-			-- Continuar moviéndose
 			if not self.lastMoveCommand or tick() - self.lastMoveCommand > 0.5 then
 				self.humanoid:MoveTo(targetNode.Position)
 				self.lastMoveCommand = tick()
@@ -435,125 +222,69 @@ end
 
 function NPCAIController:MoveToNextPatrolNode()
 	if #self.patrolNodes == 0 then return end
-
 	self.currentPatrolIndex = self.currentPatrolIndex + 1
-	if self.currentPatrolIndex > #self.patrolNodes then
-		self.currentPatrolIndex = 1
-	end
-
+	if self.currentPatrolIndex > #self.patrolNodes then self.currentPatrolIndex = 1 end
 	local targetNode = self.patrolNodes[self.currentPatrolIndex]
 	self.humanoid:MoveTo(targetNode.Position)
 end
 
 -- ==============================================================================
--- OBSERVING (NUEVO ESTADO INDEPENDIENTE)
+-- OBSERVING
 -- ==============================================================================
 
 function NPCAIController:EnterObserving()
 	self.currentObservationIndex = 1
 	self.observationStartTime = tick()
 
-	-- Calcular orientación: mirar hacia el SIGUIENTE nodo
+	-- Orientación hacia el siguiente nodo
 	local nextPatrolIndex = self.currentPatrolIndex + 1
-	if nextPatrolIndex > #self.patrolNodes then
-		nextPatrolIndex = 1
-	end
-
+	if nextPatrolIndex > #self.patrolNodes then nextPatrolIndex = 1 end
 	local currentNode = self.patrolNodes[self.currentPatrolIndex]
 	local nextNode = self.patrolNodes[nextPatrolIndex]
+	local directionToNext = (nextNode.Position - currentNode.Position) * Vector3.new(1,0,1)
 
-	-- Dirección hacia el siguiente nodo
-	local directionToNext = (nextNode.Position - currentNode.Position)
-	local directionFlat = Vector3.new(directionToNext.X, 0, directionToNext.Z)
-
-	-- Crear CFrame mirando hacia el siguiente nodo
-	if directionFlat.Magnitude > 0.1 then
-		self.originalCFrame = CFrame.lookAt(self.rootPart.Position, self.rootPart.Position + directionFlat)
+	if directionToNext.Magnitude > 0.1 then
+		self.originalCFrame = CFrame.lookAt(self.rootPart.Position, self.rootPart.Position + directionToNext)
 		self.rootPart.CFrame = self.originalCFrame
 	else
 		self.originalCFrame = self.rootPart.CFrame
 	end
 
-	-- Detener movimiento y auto-rotación
 	self.humanoid:MoveTo(self.rootPart.Position)
 	self.humanoid.AutoRotate = false
-
-	-- 🆕 Animación idle al observar
-	if self.animator then
-		self.animator:PlayAnimation("idle")
-	end
-
-	-- Aplicar el primer ángulo con tween
+	if self.animator then self.animator:PlayAnimation("idle") end
 	self:RotateToObservationAngle(self.observationAngles[1])
 end
 
 function NPCAIController:UpdateObserving()
-	-- Interrupción: Si detectamos target, cambiar a CHASING
-	if self.target then
-		self:ChangeState(AIState.CHASING)
-		return
-	end
+	-- Interrupciones manejadas en UpdateSenses()
 
 	local currentTime = tick()
-	local timeInCurrentAngle = currentTime - self.observationStartTime
-
-	-- Avanzar al siguiente ángulo si pasó el tiempo
-	if timeInCurrentAngle >= self.observationTimePerAngle then
+	if currentTime - self.observationStartTime >= self.observationTimePerAngle then
 		self.currentObservationIndex = self.currentObservationIndex + 1
-
-		-- Terminar secuencia: volver a PATROLLING
 		if self.currentObservationIndex > #self.observationAngles then
 			self:ChangeState(AIState.PATROLLING)
 			return
 		end
-
-		-- Rotar al siguiente ángulo
-		local nextAngle = self.observationAngles[self.currentObservationIndex]
 		self.observationStartTime = currentTime
-		self:RotateToObservationAngle(nextAngle)
+		self:RotateToObservationAngle(self.observationAngles[self.currentObservationIndex])
 	end
 end
 
 function NPCAIController:ExitObserving()
-
-	-- Cancelar tween en progreso
-	if self.currentRotationTween then
-		self.currentRotationTween:Cancel()
-		self.currentRotationTween = nil
-	end
-
-	-- Resetear variables de observación
+	if self.currentRotationTween then self.currentRotationTween:Cancel() end
 	self.currentObservationIndex = 1
 	self.originalCFrame = nil
 	self.targetObservationCFrame = nil
-
-	-- Reactivar auto-rotación
 	self.humanoid.AutoRotate = true
 end
 
 function NPCAIController:RotateToObservationAngle(angle)
-	if not self.originalCFrame then
-		return
-	end
-
-	-- Cancelar tween anterior
-	if self.currentRotationTween then
-		self.currentRotationTween:Cancel()
-	end
-
-	-- Calcular nueva orientación
-	local angleInRadians = math.rad(angle)
-	local rotationCFrame = CFrame.Angles(0, angleInRadians, 0)
-	self.targetObservationCFrame = self.originalCFrame * rotationCFrame
-
-	-- Crear tween
-	local tweenGoal = {CFrame = self.targetObservationCFrame}
-	self.currentRotationTween = TweenService:Create(
-		self.rootPart, 
-		self.rotationTweenInfo, 
-		tweenGoal
-	)
-
+	if not self.originalCFrame then return end
+	if self.currentRotationTween then self.currentRotationTween:Cancel() end
+	
+	local targetCFrame = self.originalCFrame * CFrame.Angles(0, math.rad(angle), 0)
+	self.currentRotationTween = TweenService:Create(self.rootPart, self.rotationTweenInfo, {CFrame = targetCFrame})
 	self.currentRotationTween:Play()
 end
 
@@ -563,11 +294,7 @@ end
 
 function NPCAIController:UpdateChasing()
 	self.humanoid.WalkSpeed = self.chaseSpeed
-
-	-- 🆕 Animación de correr
-	if self.animator then
-		self.animator:PlayAnimation("run")
-	end
+	if self.animator then self.animator:PlayAnimation("run") end
 
 	if not self.target then
 		self:ChangeState(AIState.RETURNING)
@@ -580,25 +307,26 @@ function NPCAIController:UpdateChasing()
 		return
 	end
 
+	-- Verificar rango de ataque usando el CombatSystem (consultar solamente)
 	local distance = (self.rootPart.Position - targetRoot.Position).Magnitude
-
-	if distance <= self.attackRange then
+	if distance <= self.combatSystem.attackRange then -- Accedemos a config del combat system
 		self.currentPath = nil
 		self:ChangeState(AIState.ATTACKING)
 		return
 	end
 
-	self.lastSeenPosition = targetRoot.Position
+	-- El VisionSensor ya actualiza lastSeenPosition en UpdateSenses
 	self:NavigateToTarget(targetRoot)
 end
 
 function NPCAIController:NavigateToTarget(targetRoot)
 	local distance = (self.rootPart.Position - targetRoot.Position).Magnitude
-
+	
+	-- Lógica de navegación (Graph vs Direct)
 	if self.navigationMode == "graph" then
 		self:ChaseUsingGraph(targetRoot)
 	elseif self.navigationMode == "pathfinding" then
-		self:ChaseUsingPathfinding(targetRoot)
+		self.humanoid:MoveTo(targetRoot.Position)
 	else -- hybrid
 		if distance <= self.graphChaseDistance then
 			self.currentPath = nil
@@ -612,13 +340,8 @@ end
 function NPCAIController:ChaseUsingGraph(targetRoot)
 	local currentTime = tick()
 	local targetPosition = targetRoot.Position
-
-	local targetMoved = self.targetLastPosition
-		and (targetPosition - self.targetLastPosition).Magnitude > 15
-
-	local needsRecalculation = not self.currentPath
-		or currentTime - self.lastPathCalculation > self.pathRecalculateInterval
-		or targetMoved
+	local targetMoved = self.targetLastPosition and (targetPosition - self.targetLastPosition).Magnitude > 15
+	local needsRecalculation = not self.currentPath or currentTime - self.lastPathCalculation > self.pathRecalculateInterval or targetMoved
 
 	if needsRecalculation then
 		self:CalculateGraphPathToPosition(targetPosition)
@@ -638,7 +361,6 @@ function NPCAIController:CalculateGraphPathToPosition(targetPosition)
 	local endNode = self.graph:GetNearestNode(targetPosition)
 
 	if not startNode or not endNode then
-		self:Log("pathfinding", "PATH FALLIDO: startNode=" .. tostring(startNode and startNode.name) .. ", endNode=" .. tostring(endNode and endNode.name))
 		self.currentPath = nil
 		return
 	end
@@ -647,39 +369,26 @@ function NPCAIController:CalculateGraphPathToPosition(targetPosition)
 
 	if path and #path > 0 then
 		self.currentPath = path
-
-		-- Encontrar el mejor punto de inicio en el path
-		-- En lugar de siempre empezar en índice 1, buscar el nodo más cercano
-		-- que esté "adelante" en la dirección del objetivo
+		self.timeStartedMovingToNode = tick()
+		
+		-- Optimización de inicio de path
 		local bestIndex = 1
 		local npcPos = self.rootPart.Position
 		local bestScore = math.huge
-
 		for i, node in ipairs(path) do
 			local distToNode = (npcPos - node.position).Magnitude
-			-- Penalizar nodos que están más lejos del objetivo final
 			local distNodeToEnd = (node.position - targetPosition).Magnitude
-			-- Score: queremos estar cerca del nodo Y que ese nodo esté cerca del final
 			local score = distToNode + distNodeToEnd * 0.1
-
 			if distToNode < 5 and score < bestScore then
 				bestScore = score
 				bestIndex = i
 			end
 		end
-
-		-- Si estamos muy cerca del nodo en bestIndex, avanzar al siguiente
 		if bestIndex < #path then
-			local distToBest = (npcPos - path[bestIndex].position).Magnitude
-			if distToBest < 2 then
-				bestIndex = bestIndex + 1
-			end
+			if (npcPos - path[bestIndex].position).Magnitude < 2 then bestIndex = bestIndex + 1 end
 		end
-
 		self.currentPathIndex = bestIndex
-		self:Log("pathfinding", "PATH CALCULADO: " .. startNode.name .. " → " .. endNode.name .. " (" .. #path .. " nodos, inicio=" .. bestIndex .. ")")
 	else
-		self:Log("pathfinding", "PATH NO ENCONTRADO: " .. startNode.name .. " → " .. endNode.name .. " (nodos desconectados?)")
 		self.currentPath = nil
 	end
 end
@@ -690,57 +399,29 @@ function NPCAIController:FollowCurrentPath()
 		return
 	end
 
+	if tick() - self.timeStartedMovingToNode > self.nodeTimeout then
+		self.currentPath = nil
+		return
+	end
+
 	local targetNode = self.currentPath[self.currentPathIndex]
 	local distance = (self.rootPart.Position - targetNode.position).Magnitude
-
 	self.humanoid:MoveTo(targetNode.position)
 
 	if distance < 3 then
 		self.currentPathIndex = self.currentPathIndex + 1
-
-		if self.currentPathIndex > #self.currentPath then
-			self.currentPath = nil
-		end
-	end
-end
-
-function NPCAIController:ChaseUsingPathfinding(targetRoot)
-	self.humanoid:MoveTo(targetRoot.Position)
-end
-
--- NavigateToPosition: Usado para persecución (objetivo dinámico)
--- Para objetivos estáticos (retorno), usar EnterReturning + FollowCurrentPath
-function NPCAIController:NavigateToPosition(position)
-	if self.navigationMode == "graph" or self.navigationMode == "hybrid" then
-		local currentTime = tick()
-
-		-- Recalcular si no hay path o pasó el intervalo
-		if not self.currentPath or currentTime - self.lastPathCalculation > self.pathRecalculateInterval then
-			self:CalculateGraphPathToPosition(position)
-			self.lastPathCalculation = currentTime
-		end
-
-		if self.currentPath and #self.currentPath > 0 then
-			self:FollowCurrentPath()
-		else
-			self.humanoid:MoveTo(position)
-		end
-	else
-		self.humanoid:MoveTo(position)
+		self.timeStartedMovingToNode = tick()
+		if self.currentPathIndex > #self.currentPath then self.currentPath = nil end
 	end
 end
 
 -- ==============================================================================
--- ATTACKING
+-- ATTACKING (REFACTORIZADO)
 -- ==============================================================================
 
 function NPCAIController:UpdateAttacking()
 	self.humanoid:MoveTo(self.rootPart.Position)
-
-	-- 🆕 Idle mientras ataca
-	if self.animator then
-		self.animator:PlayAnimation("idle")
-	end
+	if self.animator then self.animator:PlayAnimation("idle") end
 
 	if not self.target then
 		self:ChangeState(AIState.RETURNING)
@@ -754,10 +435,9 @@ function NPCAIController:UpdateAttacking()
 		return
 	end
 
+	-- Verificar rango + buffer
 	local distance = (self.rootPart.Position - targetRoot.Position).Magnitude
-
-	-- Buffer zone para evitar thrashing
-	if distance > (self.attackRange + 1) then
+	if distance > (self.combatSystem.attackRange + 1) then
 		self:ChangeState(AIState.CHASING)
 		return
 	end
@@ -768,137 +448,87 @@ function NPCAIController:UpdateAttacking()
 		self.rootPart.CFrame = CFrame.lookAt(self.rootPart.Position, self.rootPart.Position + direction)
 	end
 
-	if tick() - self.lastAttackTime >= self.attackCooldown then
-		self:PerformAttack()
-		self.lastAttackTime = tick()
-	end
-end
-
-function NPCAIController:PerformAttack()
-	if not self.target then return end
-
-	local targetHumanoid = self.target:FindFirstChildOfClass("Humanoid")
-	if targetHumanoid then
-		targetHumanoid:TakeDamage(self.attackDamage)
-	end
+	-- 🆕 USAR COMBAT SYSTEM
+	self.combatSystem:TryAttack(self.target)
 end
 
 -- ==============================================================================
--- INVESTIGATING (NUEVO ESTADO)
+-- INVESTIGATING
 -- ==============================================================================
 
 function NPCAIController:EnterInvestigating()
-	self:Log("stateChanges", "Iniciando investigación en la última posición conocida.")
+	self:Log("stateChanges", "Iniciando investigación en " .. tostring(self.lastSeenPosition))
 	self.investigationStartTime = tick()
-	self.investigationDuration = 7 -- Duración de la búsqueda en segundos
-	self.humanoid.AutoRotate = false -- Para controlar la rotación manualmente
+	self.investigationDuration = 15
+	self.humanoid.AutoRotate = true
+    if self.lastSeenPosition then
+	    self:CalculateGraphPathToPosition(self.lastSeenPosition)
+    end
 end
 
 function NPCAIController:UpdateInvestigating()
-	-- GLOBAL TIMEOUT: Si la investigación dura demasiado, rendirse.
 	if tick() - self.investigationStartTime > self.investigationDuration then
-		self:Log("stateChanges", "Investigación terminada por timeout global.")
 		self:ChangeState(AIState.RETURNING)
 		return
 	end
+	
+	-- Vision check es en UpdateSenses
 
-	-- Interrupción: Si detectamos target, volver a CHASING
-	if self.target then
-		self:ChangeState(AIState.CHASING)
-		return
-	end
-
-	-- Moverse hacia el punto de investigación
-	if self.lastSeenPosition then
-		local distanceToLastSeen = (self.rootPart.Position - self.lastSeenPosition).Magnitude
-
-		if distanceToLastSeen > 3 then
-			self.humanoid:MoveTo(self.lastSeenPosition)
-			if self.animator then self.animator:PlayAnimation("walk") end
-		else
-			-- Llegamos al punto, "buscar"
-			self.humanoid:MoveTo(self.rootPart.Position)
-			if self.animator then self.animator:PlayAnimation("idle") end
-
-			-- Lógica de búsqueda: mirar a los lados
-			local timeInState = tick() - self.stateStartTime
-			local lookAngle = math.sin(timeInState * 2) * 45
-			local lookDirection = self.rootPart.CFrame.LookVector
-			local newCFrame = CFrame.lookAt(self.rootPart.Position, self.rootPart.Position + lookDirection) * CFrame.Angles(0, math.rad(lookAngle), 0)
-			self.rootPart.CFrame = self.rootPart.CFrame:Lerp(newCFrame, 0.1)
-		end
+	if self.currentPath and #self.currentPath > 0 then
+		if self.animator then self.animator:PlayAnimation("walk") end
+		self:FollowCurrentPath()
 	else
-		-- Sin posición para investigar, volver a la ruta.
-		self:Log("stateChanges", "No hay posición para investigar, volviendo a la ruta.")
-		self:ChangeState(AIState.RETURNING)
+		self.humanoid.AutoRotate = false
+		self.humanoid:MoveTo(self.rootPart.Position)
+		if self.animator then self.animator:PlayAnimation("idle") end
+		
+		-- Comportamiento de mirar alrededor
+		local timeInState = tick() - self.stateStartTime
+		local lookAngle = math.sin(timeInState * 2) * 45
+		local lookDirection = self.rootPart.CFrame.LookVector
+		local newCFrame = CFrame.lookAt(self.rootPart.Position, self.rootPart.Position + lookDirection) * CFrame.Angles(0, math.rad(lookAngle), 0)
+		self.rootPart.CFrame = self.rootPart.CFrame:Lerp(newCFrame, 0.1)
 	end
 end
 
 function NPCAIController:ExitInvestigating()
 	self.investigationStartTime = nil
-	self.humanoid.AutoRotate = true -- Restaurar la auto-rotación
+	self.humanoid.AutoRotate = true
+	self.currentPath = nil
+	self.currentPathIndex = 1
 end
 
 -- ==============================================================================
--- RETURNING (Arquitectura Enter/Update separada)
+-- RETURNING
 -- ==============================================================================
 
 function NPCAIController:EnterReturning()
-	-- Limpiar estado de persecución
 	self.target = nil
 	self.lastSeenPosition = nil
-	self.detectionFrameCount = nil
-	self.lostDetectionTime = nil
+	-- Resetear sensor al iniciar retorno para evitar "fantasmas"
+	-- self.visionSensor:Reset() -- TODO: Implementar si fuera necesario
 
-	-- Determinar destino de retorno (se calcula UNA vez al entrar)
 	self.returnTargetNode = self:GetNearestPatrolNode()
-
-	if not self.returnTargetNode then
-		warn("[" .. self.npc.Name .. "] No se encontró nodo de patrulla para retorno")
-		return
-	end
-
-	-- Calcular ruta completa UNA sola vez
+	if not self.returnTargetNode then return end
 	self:CalculateGraphPathToPosition(self.returnTargetNode.Position)
-
-	self:Log("returning", "Iniciando retorno a " .. self.returnTargetNode.Name ..
-		" (dist=" .. string.format("%.1f", (self.rootPart.Position - self.returnTargetNode.Position).Magnitude) .. ")" ..
-		(self.currentPath and (" [" .. #self.currentPath .. " nodos]") or " [directo]"))
 end
 
 function NPCAIController:UpdateReturning()
 	self.humanoid.WalkSpeed = self.patrolSpeed
+	if self.animator then self.animator:PlayAnimation("walk") end
+	
+	-- Interrupción por visión en UpdateSenses
 
-	if self.animator then
-		self.animator:PlayAnimation("walk")
-	end
-
-	-- Interrupción: Si detectamos target, volver a CHASING
-	if self.target then
-		self:Log("returning", "Target detectado durante retorno, volviendo a CHASING")
-		self:ChangeState(AIState.CHASING)
+	if self.returnTargetNode and (self.rootPart.Position - self.returnTargetNode.Position).Magnitude < 3 then
+		self:ChangeState(AIState.PATROLLING)
 		return
 	end
 
-	-- Verificar si llegamos al destino
-	if self.returnTargetNode then
-		local distance = (self.rootPart.Position - self.returnTargetNode.Position).Magnitude
-
-		if distance < 3 then
-			self:Log("returning", "Llegué a nodo patrulla: " .. self.returnTargetNode.Name)
-			self:ChangeState(AIState.PATROLLING)
-			return
-		end
-	end
-
-	-- Ejecutar el plan: seguir el path pre-calculado
 	if self.currentPath and #self.currentPath > 0 then
 		self:FollowCurrentPath()
 	elseif self.returnTargetNode then
-		-- Fallback: movimiento directo si no hay path
 		self.humanoid:MoveTo(self.returnTargetNode.Position)
 	else
-		-- Sin destino válido, volver a patrullar
 		self:ChangeState(AIState.PATROLLING)
 	end
 end
@@ -912,7 +542,6 @@ end
 function NPCAIController:GetNearestPatrolNode()
 	local nearestNode = nil
 	local shortestDistance = math.huge
-
 	for _, node in ipairs(self.patrolNodes) do
 		local distance = (self.rootPart.Position - node.Position).Magnitude
 		if distance < shortestDistance then
@@ -920,49 +549,23 @@ function NPCAIController:GetNearestPatrolNode()
 			nearestNode = node
 		end
 	end
-
 	return nearestNode
 end
 
 -- ==============================================================================
--- STATE INDICATOR SYSTEM (DEBUG VISUAL)
+-- STATE MANAGEMENT & INDICATORS
 -- ==============================================================================
 
 local STATE_VISUALS = {
-	[AIState.PATROLLING] = {
-		emoji = "🚶",
-		text = "PATROLLING",
-		color = Color3.fromRGB(0, 255, 0),  -- Verde
-	},
-	[AIState.OBSERVING] = {
-		emoji = "👁️",
-		text = "OBSERVING",
-		color = Color3.fromRGB(100, 150, 255),  -- Azul
-	},
-	[AIState.CHASING] = {
-		emoji = "🏃",
-		text = "CHASING",
-		color = Color3.fromRGB(255, 0, 0),  -- Rojo
-	},
-	[AIState.ATTACKING] = {
-		emoji = "⚔️",
-		text = "ATTACKING",
-		color = Color3.fromRGB(255, 100, 0),  -- Naranja
-	},
-	[AIState.INVESTIGATING] = {
-		emoji = "❓",
-		text = "INVESTIGATING",
-		color = Color3.fromRGB(255, 165, 0), -- Naranja claro
-	},
-	[AIState.RETURNING] = {
-		emoji = "🔄",
-		text = "RETURNING",
-		color = Color3.fromRGB(255, 255, 0),  -- Amarillo
-	}
+	[AIState.PATROLLING] = {emoji = "🚶", text = "PATROLLING", color = Color3.fromRGB(0, 255, 0)},
+	[AIState.OBSERVING] = {emoji = "👁️", text = "OBSERVING", color = Color3.fromRGB(100, 150, 255)},
+	[AIState.CHASING] = {emoji = "🏃", text = "CHASING", color = Color3.fromRGB(255, 0, 0)},
+	[AIState.ATTACKING] = {emoji = "⚔️", text = "ATTACKING", color = Color3.fromRGB(255, 100, 0)},
+	[AIState.INVESTIGATING] = {emoji = "❓", text = "INVESTIGATING", color = Color3.fromRGB(255, 165, 0)},
+	[AIState.RETURNING] = {emoji = "🔄", text = "RETURNING", color = Color3.fromRGB(255, 255, 0)}
 }
 
 function NPCAIController:CreateStateIndicator()
-	-- BillboardGui simple con emoji + texto
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "StateIndicator"
 	billboard.Size = UDim2.fromOffset(150, 40)
@@ -970,114 +573,66 @@ function NPCAIController:CreateStateIndicator()
 	billboard.AlwaysOnTop = true
 	billboard.Parent = self.rootPart
 
-	-- Label con emoji + texto
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1  -- Sin fondo
+	label.BackgroundTransparency = 1
 	label.Text = "🚶 PATROLLING"
 	label.TextSize = 18
 	label.Font = Enum.Font.SourceSansBold
-	label.TextColor3 = Color3.fromRGB(0, 255, 0)  -- Verde inicial
-	label.TextStrokeTransparency = 0.5  -- Contorno para legibilidad
+	label.TextColor3 = Color3.fromRGB(0, 255, 0)
+	label.TextStrokeTransparency = 0.5
 	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	label.Parent = billboard
 
-	self.stateIndicator = {
-		billboard = billboard,
-		label = label
-	}
+	self.stateIndicator = {billboard = billboard, label = label}
 end
 
 function NPCAIController:UpdateStateIndicator()
-	if not self.showStateIndicator then return end
-
+	if not self.showStateIndicator or not self.stateIndicator then return end
 	local visual = STATE_VISUALS[self.currentState]
-	if not visual then
-		return
-	end
-
-	-- Actualizar emoji + texto + color
-	if self.stateIndicator then
+	if visual then
 		self.stateIndicator.label.Text = visual.emoji .. " " .. visual.text
 		self.stateIndicator.label.TextColor3 = visual.color
 	end
 end
 
-function NPCAIController:DestroyStateIndicator()
-	if self.stateIndicator and self.stateIndicator.billboard then
-		self.stateIndicator.billboard:Destroy()
-		self.stateIndicator = nil
-	end
-end
-
--- ==============================================================================
--- STATE MANAGEMENT (REFACTORIZADO CON ENTER/EXIT)
--- ==============================================================================
-
 function NPCAIController:ChangeState(newState)
 	if self.currentState == newState then return end
 
-	-- EXIT del estado anterior
-	if self.currentState == AIState.OBSERVING then
-		self:ExitObserving()
-	elseif self.currentState == AIState.INVESTIGATING then
-		self:ExitInvestigating()
-	elseif self.currentState == AIState.RETURNING then
-		self:ExitReturning()
-	end
+	-- EXIT
+	if self.currentState == AIState.OBSERVING then self:ExitObserving()
+	elseif self.currentState == AIState.INVESTIGATING then self:ExitInvestigating()
+	elseif self.currentState == AIState.RETURNING then self:ExitReturning() end
 
 	local oldState = self.currentState
 	self.currentState = newState
 	self.stateStartTime = tick()
-
-	-- Debug: Log transición de estado
 	self:Log("stateChanges", oldState .. " → " .. newState)
 
-	-- Actualizar indicador visual de estado
-	if self.showStateIndicator then
-		self:UpdateStateIndicator()
-	end
+	if self.showStateIndicator then self:UpdateStateIndicator() end
 
-	-- ENTER del nuevo estado
+	-- ENTER
 	if newState == AIState.PATROLLING then
-		-- Solo avanzar nodo si venimos de OBSERVING
-		if oldState == AIState.OBSERVING then
-			self:MoveToNextPatrolNode()
-		end
-		self.detectionFrameCount = nil
-
-	elseif newState == AIState.OBSERVING then
-		self:EnterObserving()
-	
-	elseif newState == AIState.INVESTIGATING then
-		self:EnterInvestigating()
-
+		if oldState == AIState.OBSERVING then self:MoveToNextPatrolNode() end
+	elseif newState == AIState.OBSERVING then self:EnterObserving()
+	elseif newState == AIState.INVESTIGATING then self:EnterInvestigating()
 	elseif newState == AIState.CHASING then
 		self.currentPath = nil
 		self.currentPathIndex = 1
 		self.lastPathCalculation = 0
 		self.targetLastPosition = nil
-
-	elseif newState == AIState.RETURNING then
-		self:EnterReturning()
+	elseif newState == AIState.RETURNING then self:EnterReturning()
 	end
 end
 
 function NPCAIController:Destroy()
 	self.isActive = false
-
-	if self.currentRotationTween then
-		self.currentRotationTween:Cancel()
-	end
-
-	-- Limpiar indicador de estado
-	self:DestroyStateIndicator()
-
-	-- 🆕 Limpiar animador
-	if self.animator then
-		self.animator:Destroy()
-		self.animator = nil
-	end
+	if self.currentRotationTween then self.currentRotationTween:Cancel() end
+	if self.stateIndicator then self.stateIndicator.billboard:Destroy() end
+	if self.animator then self.animator:Destroy() end
+	
+	-- Limpiar sensores
+	if self.hearingSensor then self.hearingSensor:Destroy() end
 end
 
 return NPCAIController

@@ -16,9 +16,7 @@ return {
 	chaseSpeed = 8,
 
 	-- Sistema de cono de visión
-	observationConeRays = 11,
 	observationConeAngle = 90,
-	coneVisualDuration = 0.1,
 
 	-- Sistema de observación con rotación suave
 	observationAngles = { -45, 0, 45, 0 },
