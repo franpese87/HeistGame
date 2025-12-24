@@ -1,3 +1,5 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Janitor = require(ReplicatedStorage.Packages.janitor)
 local NoiseService = require(script.Parent.Parent.NoiseService)
 
 local HearingSensor = {}
@@ -6,41 +8,38 @@ HearingSensor.__index = HearingSensor
 function HearingSensor.new(npc, config)
 	local self = setmetatable({}, HearingSensor)
 
+	self.janitor = Janitor.new()
 	self.npc = npc
 	self.rootPart = npc:FindFirstChild("HumanoidRootPart")
-	
+
 	-- Configuración
 	config = config or {}
-	self.hearingMultiplier = config.hearingMultiplier or 1.0 -- >1 escucha más lejos, <1 es sordo
-	self.memoryDuration = config.noiseMemoryDuration or 5.0   -- Cuánto tiempo recuerda un ruido
+	self.hearingMultiplier = config.hearingMultiplier or 1.0
+	self.memoryDuration = config.noiseMemoryDuration or 5.0
 
 	-- Estado (Memoria a corto plazo)
 	self.lastNoise = nil
 
-	-- Registrarse en el servicio global
-	-- NOTA: Modificaremos NoiseService ligeramente para que acepte este componente en lugar del controlador
-	NoiseService.RegisterListener(self)
+	-- Conectar al Signal de NoiseService
+	self.janitor:Add(NoiseService.NoiseDetected:Connect(function(position, range)
+		self:OnGlobalNoise(position, range)
+	end))
 
 	return self
 end
 
--- Este método será llamado por el NoiseService
+-- Callback cuando se detecta un ruido global
 function HearingSensor:OnGlobalNoise(position, range)
 	if not self.rootPart then return end
 
-	-- Calcular distancia real
 	local distance = (self.rootPart.Position - position).Magnitude
-	
-	-- Aplicar multiplicador auditivo del NPC
-	-- Si range=50 y multiplier=1.2, escucha hasta 60 studs
 	local effectiveRange = range * self.hearingMultiplier
 
 	if distance <= effectiveRange then
-		-- Guardar el ruido en memoria
 		self.lastNoise = {
 			position = position,
 			time = tick(),
-			priority = 1 -- Preparado para futuro (disparos > pasos)
+			priority = 1
 		}
 	end
 end
@@ -65,7 +64,7 @@ function HearingSensor:CheckForNoise()
 end
 
 function HearingSensor:Destroy()
-	NoiseService.UnregisterListener(self)
+	self.janitor:Destroy()
 	self.lastNoise = nil
 end
 

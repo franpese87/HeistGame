@@ -1,31 +1,21 @@
 -- NoiseService: Un servicio centralizado para manejar ruidos y la reacción de la IA.
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Debris = game:GetService("Debris")
+
+local Signal = require(ReplicatedStorage.Packages.signal)
 
 local NoiseService = {}
 
-NoiseService.listeners = {}
+NoiseService.NoiseDetected = Signal.new()
 NoiseService.debug = true -- Bandera para controlar la visualización de ruidos
 
 -- |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| --
--- GESTIÓN DE OYENTES
+-- GESTIÓN DE OYENTES (DEPRECATED - Migrado a Signal)
 -- |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| --
 
--- Registra un componente HearingSensor
-function NoiseService.RegisterListener(listener)
-	if not listener then return end
-	table.insert(NoiseService.listeners, listener)
-end
-
--- Elimina un oyente de la lista
-function NoiseService.UnregisterListener(listenerToRemove)
-	for i, listener in ipairs(NoiseService.listeners) do
-		if listener == listenerToRemove then
-			table.remove(NoiseService.listeners, i)
-			break
-		end
-	end
-end
+-- Estos métodos se mantienen por compatibilidad pero ya no se usan
+-- Los listeners ahora se conectan directamente a NoiseService.NoiseDetected:Connect()
 
 -- |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| --
 -- CREACIÓN DE RUIDO
@@ -35,14 +25,9 @@ function NoiseService.MakeNoise(position, range, _travelsThroughFloors)
 	if NoiseService.debug then
 		NoiseService.VisualizeNoise(position, range)
 	end
-	
-	-- Difundir el ruido a todos los sensores registrados.
-	-- El sensor individual decidirá si lo escucha o no (basado en distancia y stats).
-	for _, listener in ipairs(NoiseService.listeners) do
-		if listener.OnGlobalNoise then
-			listener:OnGlobalNoise(position, range)
-		end
-	end
+
+	-- Emitir señal con los datos del ruido
+	NoiseService.NoiseDetected:Fire(position, range)
 end
 
 -- |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| --

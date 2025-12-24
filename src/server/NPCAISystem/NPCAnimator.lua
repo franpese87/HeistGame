@@ -1,3 +1,6 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Janitor = require(ReplicatedStorage.Packages.janitor)
+
 local NPCAnimator = {}
 NPCAnimator.__index = NPCAnimator
 
@@ -25,6 +28,7 @@ local ANIMATION_SPEEDS = {
 function NPCAnimator.new(humanoid)
 	local self = setmetatable({}, NPCAnimator)
 
+	self.janitor = Janitor.new()
 	self.humanoid = humanoid
 	self.animator = humanoid:FindFirstChildOfClass("Animator")
 
@@ -46,10 +50,11 @@ function NPCAnimator.new(humanoid)
 
 		-- Cargar el track
 		local track = self.animator:LoadAnimation(animation)
-		track.Looped = true  -- Todas nuestras animaciones son en loop
+		track.Looped = true
 		track.Priority = Enum.AnimationPriority.Core
 
 		self.animationTracks[animName] = track
+		self.janitor:Add(track, "Destroy")
 	end
 
 	-- Estado actual
@@ -142,10 +147,7 @@ end
 
 function NPCAnimator:Destroy()
 	self:StopAll()
-
-	for _, track in pairs(self.animationTracks) do
-		track:Destroy()
-	end
+	self.janitor:Destroy()
 
 	self.animationTracks = {}
 	self.animations = {}

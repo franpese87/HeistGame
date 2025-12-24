@@ -12,6 +12,7 @@ return {
 	showNodes = true,
 	showCells = true,
 	showConnections = true,
+	showLabels = false, -- Billboards de texto en nodos y celdas
 
 	-- Estilo visual - Nodos
 	nodeColor = Color3.fromRGB(0, 255, 0),

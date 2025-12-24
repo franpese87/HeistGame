@@ -1,5 +1,8 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
+
+local Janitor = require(ReplicatedStorage.Packages.janitor)
 local NoiseService = require(script.Parent.NoiseService)
 local VisionSensor = require(script.Parent.Components.VisionSensor)
 local CombatSystem = require(script.Parent.Components.CombatSystem)
@@ -24,6 +27,9 @@ NPCAIController.__index = NPCAIController
 
 function NPCAIController.new(npc, navigationGraph, config)
 	local self = setmetatable({}, NPCAIController)
+
+	-- Janitor para cleanup automático
+	self.janitor = Janitor.new()
 
 	self.npc = npc
 	self.humanoid = npc:FindFirstChildOfClass("Humanoid")
@@ -94,6 +100,7 @@ function NPCAIController.new(npc, navigationGraph, config)
 	-- 🆕 Sistema de animaciones custom
 	local NPCAnimator = require(script.Parent.NPCAnimator)
 	self.animator = NPCAnimator.new(self.humanoid)
+	self.janitor:Add(self.animator, "Destroy")
 
 	-- 🆕 Sistema de indicadores de estado
 	self.showStateIndicator = config.showStateIndicator or false
@@ -272,7 +279,7 @@ function NPCAIController:UpdateObserving()
 end
 
 function NPCAIController:ExitObserving()
-	if self.currentRotationTween then self.currentRotationTween:Cancel() end
+	self.janitor:Remove("rotationTween")
 	self.currentObservationIndex = 1
 	self.originalCFrame = nil
 	self.targetObservationCFrame = nil
@@ -281,11 +288,12 @@ end
 
 function NPCAIController:RotateToObservationAngle(angle)
 	if not self.originalCFrame then return end
-	if self.currentRotationTween then self.currentRotationTween:Cancel() end
-	
+	self.janitor:Remove("rotationTween")
+
 	local targetCFrame = self.originalCFrame * CFrame.Angles(0, math.rad(angle), 0)
-	self.currentRotationTween = TweenService:Create(self.rootPart, self.rotationTweenInfo, {CFrame = targetCFrame})
-	self.currentRotationTween:Play()
+	local tween = TweenService:Create(self.rootPart, self.rotationTweenInfo, {CFrame = targetCFrame})
+	self.janitor:Add(tween, "Cancel", "rotationTween")
+	tween:Play()
 end
 
 -- ==============================================================================
@@ -572,6 +580,7 @@ function NPCAIController:CreateStateIndicator()
 	billboard.StudsOffset = Vector3.new(0, self.stateIndicatorOffset, 0)
 	billboard.AlwaysOnTop = true
 	billboard.Parent = self.rootPart
+	self.janitor:Add(billboard, "Destroy")
 
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
@@ -627,10 +636,8 @@ end
 
 function NPCAIController:Destroy()
 	self.isActive = false
-	if self.currentRotationTween then self.currentRotationTween:Cancel() end
-	if self.stateIndicator then self.stateIndicator.billboard:Destroy() end
-	if self.animator then self.animator:Destroy() end
-	
+	self.janitor:Destroy()
+
 	-- Limpiar sensores
 	if self.hearingSensor then self.hearingSensor:Destroy() end
 end

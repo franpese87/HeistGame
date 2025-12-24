@@ -377,8 +377,7 @@ function DebugUtilities.PrintSystemReport(npcManager, navGraph, spawnedNPCs, bas
 	print("    • Detección: " .. baseConfig.minDetectionTime .. "s (" ..
 		math.ceil(baseConfig.minDetectionTime * 30) .. " frames @ 30 FPS)")
 	print("    • Rango de detección: " .. baseConfig.detectionRange .. " studs")
-	print("    • Cono de visión: " .. baseConfig.observationConeRays .. " rayos × " ..
-		baseConfig.observationConeAngle .. "°")
+	print("    • Cono de visión: " .. baseConfig.observationConeAngle .. "°")
 	print("    • Sistema de observación: " .. #baseConfig.observationAngles ..
 		" ángulos × " .. baseConfig.observationTimePerAngle .. "s = " ..
 		(#baseConfig.observationAngles * baseConfig.observationTimePerAngle) .. "s por nodo")

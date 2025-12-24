@@ -1,8 +1,12 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
+
+local Janitor = require(ReplicatedStorage.Packages.janitor)
 local NoiseService = require(script.Parent.Parent.NPCAISystem.NoiseService)
 local DebugConfig = require(script.Parent.Parent.Config.DebugConfig)
+
+local janitor = Janitor.new()
 
 -- 1. Crear Estructura de Eventos
 local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
@@ -20,14 +24,14 @@ if not noiseEvent then
 end
 
 -- 2. Manejar el Evento del Servidor
-noiseEvent.OnServerEvent:Connect(function(player, position)
+janitor:Add(noiseEvent.OnServerEvent:Connect(function(player, position)
 	-- Solo permitir si el jugador es admin o estamos en Studio
 	-- Por simplicidad, permitimos a todos por ahora en desarrollo
 	print("[DebugTools] Generando ruido en: ", position)
-	
+
 	-- Crear el ruido (Rango 30 studs por defecto)
 	NoiseService.MakeNoise(position, 30)
-	
+
 	-- Visualización extra (aunque NoiseService ya tiene la suya si debug=true)
 	if DebugConfig.visuals and DebugConfig.visuals.showNoiseSpheres then
 		local p = Instance.new("Part")
@@ -41,7 +45,7 @@ noiseEvent.OnServerEvent:Connect(function(player, position)
 		p.Parent = workspace
 		game:GetService("Debris"):AddItem(p, 1)
 	end
-end)
+end))
 
 -- 3. Crear la Tool "NoiseMaker" y dársela a los jugadores
 local function giveDebugTool(player)
