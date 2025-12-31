@@ -25,8 +25,8 @@ return {
 	-- #observationAngles × observationTimePerAngle (ej: 4 × 1.5 = 6s)
 
 	-- Navegación
-	navigationMode = "graph", -- graph, pathfinding, hybrid
-	graphChaseDistance = 20,
+	-- Distancia a la que el NPC deja de usar el grafo y se acerca directamente al target para atacar
+	directApproachDistance = 8,
 
 	-- Indicador visual de estado (debug)
 	showStateIndicator = true,

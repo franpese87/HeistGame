@@ -678,8 +678,7 @@ function Visualizer.PrintSystemReport(npcManager, navGraph, spawnedNPCs, baseCon
 	print("    Sistema de observacion: " .. #baseConfig.observationAngles ..
 		" angulos x " .. baseConfig.observationTimePerAngle .. "s = " ..
 		(#baseConfig.observationAngles * baseConfig.observationTimePerAngle) .. "s por nodo")
-	print("    Navegacion: " .. baseConfig.navigationMode .. " (cambio directo a " ..
-		baseConfig.graphChaseDistance .. " studs)")
+	print("    Navegacion: grafo (acercamiento directo a " .. baseConfig.directApproachDistance .. " studs)")
 	print("    Indicador de estado: " .. (baseConfig.showStateIndicator and "Activado" or "Desactivado"))
 	print("    Nodos en workspace: " .. (debugConfig.keepNodesInWorkspace and "Mantenidos (debug)" or "Destruidos (optimizado)"))
 
