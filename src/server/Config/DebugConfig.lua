@@ -9,9 +9,9 @@ return {
 	visualizeOnStartup = true,
 
 	-- Qué visualizar
-	showNodes = true,
+	showNodes = false,
 	showCells = false,
-	showConnections = true,
+	showConnections = false,
 	showLabels = false,          -- Muestra etiquetas de texto en nodos y celdas del grafo
 
 	-- Estilo visual - Nodos

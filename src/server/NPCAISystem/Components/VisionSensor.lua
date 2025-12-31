@@ -1,7 +1,7 @@
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local Debris = game:GetService("Debris")
-local DebugUtilities = require(script.Parent.Parent.DebugUtilities)
+local DebugUtilities = require(script.Parent.Parent.Debug.Visualizer)
 
 local VisionSensor = {}
 VisionSensor.__index = VisionSensor
