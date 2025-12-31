@@ -8,9 +8,14 @@
 	- Indicadores visuales de estado
 
 	El Controller (cerebro) usa el Pawn para interactuar con el mundo físico.
+
+	Usa Janitor para gestión automática de recursos (tweens, GUI, tracks).
 ]]
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+
+local Janitor = require(ReplicatedStorage.Packages.janitor)
 
 local Pawn = {}
 Pawn.__index = Pawn
@@ -51,6 +56,9 @@ local STATE_VISUALS = {
 function Pawn.new(npcInstance, config)
 	local self = setmetatable({}, Pawn)
 
+	-- Janitor para cleanup automático
+	self.janitor = Janitor.new()
+
 	-- Referencias físicas
 	self.instance = npcInstance
 	self.humanoid = npcInstance:FindFirstChildOfClass("Humanoid")
@@ -77,9 +85,6 @@ function Pawn.new(npcInstance, config)
 	if self.showStateIndicator then
 		self:_CreateStateIndicator()
 	end
-
-	-- Tween de rotación activo
-	self.currentRotationTween = nil
 
 	return self
 end
@@ -108,6 +113,9 @@ function Pawn:_InitializeAnimations()
 		track.Looped = true
 		track.Priority = Enum.AnimationPriority.Core
 		self.animationTracks[animName] = track
+
+		-- Registrar track en janitor para cleanup automático
+		self.janitor:Add(track, "Destroy")
 	end
 
 	self.currentAnimation = nil
@@ -230,21 +238,18 @@ function Pawn:GetLookVector()
 end
 
 function Pawn:RotateWithTween(targetCFrame, tweenInfo)
-	if self.currentRotationTween then
-		self.currentRotationTween:Cancel()
-	end
+	-- Janitor cancela automáticamente el tween anterior al reemplazarlo
+	self.janitor:Remove("rotationTween")
 
-	self.currentRotationTween = TweenService:Create(self.rootPart, tweenInfo, {CFrame = targetCFrame})
-	self.currentRotationTween:Play()
+	local tween = TweenService:Create(self.rootPart, tweenInfo, {CFrame = targetCFrame})
+	self.janitor:Add(tween, "Cancel", "rotationTween")
+	tween:Play()
 
-	return self.currentRotationTween
+	return tween
 end
 
 function Pawn:CancelRotationTween()
-	if self.currentRotationTween then
-		self.currentRotationTween:Cancel()
-		self.currentRotationTween = nil
-	end
+	self.janitor:Remove("rotationTween")
 end
 
 -- ==============================================================================
@@ -258,6 +263,9 @@ function Pawn:_CreateStateIndicator()
 	billboard.StudsOffset = Vector3.new(0, self.stateIndicatorOffset, 0)
 	billboard.AlwaysOnTop = true
 	billboard.Parent = self.rootPart
+
+	-- Registrar en janitor para cleanup automático
+	self.janitor:Add(billboard, "Destroy")
 
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
@@ -319,22 +327,15 @@ end
 -- ==============================================================================
 
 function Pawn:Destroy()
-	self:CancelRotationTween()
-	self:StopAnimations()
+	-- Janitor limpia automáticamente: tweens, tracks, billboard
+	self.janitor:Destroy()
 
-	if self.stateIndicator then
-		self.stateIndicator.billboard:Destroy()
-		self.stateIndicator = nil
-	end
-
-	for _, track in pairs(self.animationTracks) do
-		track:Destroy()
-	end
-
+	-- Limpiar referencias
 	self.animationTracks = {}
 	self.animations = {}
 	self.currentTrack = nil
 	self.currentAnimation = nil
+	self.stateIndicator = nil
 end
 
 return Pawn
