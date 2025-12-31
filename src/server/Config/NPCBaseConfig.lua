@@ -21,11 +21,12 @@ return {
 	-- Sistema de observación con rotación suave
 	observationAngles = { -45, 0, 45, 0 },
 	observationTimePerAngle = 1.5,
+	-- investigationDuration se calcula automáticamente como:
+	-- #observationAngles × observationTimePerAngle (ej: 4 × 1.5 = 6s)
 
 	-- Navegación
-	navigationMode = "hybrid",
+	navigationMode = "graph", -- graph, pathfinding, hybrid
 	graphChaseDistance = 20,
-	pathRecalculateInterval = 1.0,
 
 	-- Indicador visual de estado (debug)
 	showStateIndicator = true,

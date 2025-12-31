@@ -571,7 +571,7 @@ function NavigationGraph:GetNearestNode(position, floor, options)
 	-- Si no hay spatial hash o se pide buscar en todos los pisos, usar búsqueda especial
 	if not self.spatialGrids or not next(self.spatialGrids) then
 		self:Log("nodeSearch", "SpatialGrids vacío, usando búsqueda linear")
-		return self:GetNearestNodeLinear(position, floor, options)
+		return self:GetNearestNodeLinear(position, floor)
 	end
 
 	-- Búsqueda en el piso especificado
@@ -580,7 +580,7 @@ function NavigationGraph:GetNearestNode(position, floor, options)
 	-- Si no encontramos nada y se permite buscar en otros pisos
 	if not result.node and options.searchAllFloors then
 		self:Log("nodeSearch", "No encontrado en floor " .. floor .. ", buscando en otros pisos")
-		result = self:GetNearestNodeLinear(position, nil, options)
+		result = self:GetNearestNodeLinear(position, nil)
 	end
 
 	-- Log resultado
@@ -638,8 +638,7 @@ function NavigationGraph:SearchFloorGrid(position, floor)
 end
 
 -- Búsqueda linear (fallback o para búsquedas entre pisos)
-function NavigationGraph:GetNearestNodeLinear(position, floor, options)
-	options = options or {}
+function NavigationGraph:GetNearestNodeLinear(position, floor)
 	local result = {
 		node = nil,
 		distance = math.huge,
@@ -663,6 +662,107 @@ function NavigationGraph:GetNearestNodeLinear(position, floor, options)
 end
 
 -- ==============================================================================
+-- BÚSQUEDA DE NODO ÓPTIMO HACIA TARGET
+-- ==============================================================================
+
+--[[
+	GetNearestNodeTowardsTarget busca el mejor nodo de inicio para pathfinding
+	cuando el NPC está en una intersección de múltiples nodos equidistantes.
+
+	En lugar de elegir el nodo más cercano al NPC, busca candidatos cercanos
+	y selecciona el que esté más cerca del target (mejor dirección).
+
+	Parámetros:
+	- npcPosition: Vector3 posición actual del NPC
+	- targetPosition: Vector3 posición del objetivo
+	- floor: (opcional) Número de piso
+	- candidateRadius: (opcional) Radio para buscar nodos candidatos (default: 8)
+]]
+function NavigationGraph:GetNearestNodeTowardsTarget(npcPosition, targetPosition, floor, candidateRadius)
+	candidateRadius = candidateRadius or 8  -- Debe ser mayor que la separación entre nodos (7 studs)
+
+	-- Inferir piso si no se proporciona
+	if floor == nil then
+		floor = self:GetFloorFromPosition(npcPosition)
+	end
+
+	local grid = self.spatialGrids[floor]
+	if not grid then
+		-- Fallback a búsqueda linear
+		return self:GetNearestNode(npcPosition, floor)
+	end
+
+	local cellX = math.floor(npcPosition.X / self.cellSizeX)
+	local cellZ = math.floor(npcPosition.Z / self.cellSizeZ)
+
+	-- Recolectar todos los nodos candidatos dentro del radio
+	local candidates = {}
+
+	for dx = -1, 1 do
+		for dz = -1, 1 do
+			local key = (cellX + dx) .. "," .. (cellZ + dz)
+			local nodesInCell = grid[key]
+
+			if nodesInCell then
+				for _, node in ipairs(nodesInCell) do
+					local distToNpc = (node.position - npcPosition).Magnitude
+
+					-- Solo considerar nodos dentro del radio de candidatos
+					if distToNpc <= candidateRadius then
+						table.insert(candidates, {
+							node = node,
+							distToNpc = distToNpc,
+							distToTarget = (node.position - targetPosition).Magnitude,
+						})
+					end
+				end
+			end
+		end
+	end
+
+	-- Si no hay candidatos, usar método estándar
+	if #candidates == 0 then
+		self:Log("nodeSearch", "No candidates in radius " .. candidateRadius .. ", using standard search")
+		return self:GetNearestNode(npcPosition, floor)
+	end
+
+	-- Si solo hay un candidato, devolverlo
+	if #candidates == 1 then
+		return candidates[1].node
+	end
+
+	-- Filtrar: solo mantener los que están cerca del mínimo (dentro de 2 studs del más cercano)
+	table.sort(candidates, function(a, b)
+		return a.distToNpc < b.distToNpc
+	end)
+
+	local minDistToNpc = candidates[1].distToNpc
+	local closeCandidates = {}
+
+	for _, candidate in ipairs(candidates) do
+		-- Considerar "cercanos" los que estén a menos de 2 studs de diferencia del más cercano
+		if candidate.distToNpc <= minDistToNpc + 2 then
+			table.insert(closeCandidates, candidate)
+		end
+	end
+
+	-- Entre los candidatos cercanos, elegir el que esté más cerca del target
+	local bestCandidate = closeCandidates[1]
+	for _, candidate in ipairs(closeCandidates) do
+		if candidate.distToTarget < bestCandidate.distToTarget then
+			bestCandidate = candidate
+		end
+	end
+
+	self:Log("nodeSearch", "TowardsTarget: " .. #candidates .. " candidates, " ..
+		#closeCandidates .. " close, selected " .. bestCandidate.node.name ..
+		" (distNpc=" .. string.format("%.1f", bestCandidate.distToNpc) ..
+		", distTarget=" .. string.format("%.1f", bestCandidate.distToTarget) .. ")")
+
+	return bestCandidate.node
+end
+
+-- ==============================================================================
 -- PATHFINDING (A*)
 -- ==============================================================================
 
@@ -676,13 +776,15 @@ function NavigationGraph:GetPathBetweenNodes(startNode, endNode)
 		return {endNode}
 	end
 
+	-- Usar diccionarios para búsquedas O(1) en lugar de table.find() O(n)
 	local openSet = {startNode}
-	local closedSet = {}
+	local openSetLookup = {[startNode.name] = true}  -- Para búsqueda rápida
+	local closedSet = {}  -- Diccionario: closedSet[nodeName] = true
 	local cameFrom = {}
 	local gScore = {[startNode.name] = 0}
 	local fScore = {[startNode.name] = (startNode.position - endNode.position).Magnitude}
 	local iterations = 0
-	local maxIterations = 500 -- Prevenir loops infinitos
+	local maxIterations = 500
 
 	while #openSet > 0 do
 		iterations = iterations + 1
@@ -696,6 +798,7 @@ function NavigationGraph:GetPathBetweenNodes(startNode, endNode)
 		end)
 
 		local current = table.remove(openSet, 1)
+		openSetLookup[current.name] = nil
 
 		if current.name == endNode.name then
 			local path = {current}
@@ -707,28 +810,33 @@ function NavigationGraph:GetPathBetweenNodes(startNode, endNode)
 			return path
 		end
 
-		table.insert(closedSet, current)
+		closedSet[current.name] = true
 
 		for _, neighborName in ipairs(current.connections) do
 			local neighbor = self.nodes[neighborName]
 
-			if neighbor and not table.find(closedSet, neighbor) then
+			if neighbor and not closedSet[neighborName] then
 				local tentative_gScore = gScore[current.name] + (current.position - neighbor.position).Magnitude
 
-				if not table.find(openSet, neighbor) then
+				if not openSetLookup[neighborName] then
 					table.insert(openSet, neighbor)
-				elseif tentative_gScore >= (gScore[neighbor.name] or math.huge) then
+					openSetLookup[neighborName] = true
+				elseif tentative_gScore >= (gScore[neighborName] or math.huge) then
 					continue
 				end
 
-				cameFrom[neighbor.name] = current
-				gScore[neighbor.name] = tentative_gScore
-				fScore[neighbor.name] = gScore[neighbor.name] + (neighbor.position - endNode.position).Magnitude
+				cameFrom[neighborName] = current
+				gScore[neighborName] = tentative_gScore
+				fScore[neighborName] = gScore[neighborName] + (neighbor.position - endNode.position).Magnitude
 			end
 		end
 	end
 
-	self:Log("astar", "A* FALLIDO: " .. startNode.name .. " → " .. endNode.name .. " (sin ruta, " .. iterations .. " iter, " .. #closedSet .. " explorados)")
+	local closedCount = 0
+	for _ in pairs(closedSet) do
+		closedCount = closedCount + 1
+	end
+	self:Log("astar", "A* FALLIDO: " .. startNode.name .. " → " .. endNode.name .. " (sin ruta, " .. iterations .. " iter, " .. closedCount .. " explorados)")
 	return nil
 end
 

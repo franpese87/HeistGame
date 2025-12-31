@@ -10,9 +10,9 @@ return {
 
 	-- Qué visualizar
 	showNodes = true,
-	showCells = true,
+	showCells = false,
 	showConnections = true,
-	showLabels = false, -- Billboards de texto en nodos y celdas
+	showLabels = false,          -- Muestra etiquetas de texto en nodos y celdas del grafo
 
 	-- Estilo visual - Nodos
 	nodeColor = Color3.fromRGB(0, 255, 0),
@@ -29,11 +29,15 @@ return {
 	connectionWidth = 0.1,
 
 	-- ==============================================================================
-	-- DEBUG VISUAL (SENSORS)
+	-- DEBUG VISUAL (SENSORS Y PATHS)
 	-- ==============================================================================
 	visuals = {
-		showVisionRays = true,   -- Muestra las líneas de visión (Verde/Rojo)
-		showNoiseSpheres = true, -- Muestra esferas donde se generan ruidos
+		showVisionRays = true,     -- Muestra las líneas de visión (Verde/Rojo)
+		showNoiseSpheres = true,   -- Muestra esferas donde se generan ruidos
+		showNPCPaths = true,       -- Muestra la ruta actual del NPC cuando se calcula
+		pathDuration = 3,          -- Segundos que permanece visible la ruta
+		showLastSeenPosition = true, -- Muestra esfera en la última posición detectada del target
+		showDebugLabels = true,    -- Muestra etiquetas de texto en los debugs visuales (paths, lastSeen)
 	},
 
 	-- ==============================================================================

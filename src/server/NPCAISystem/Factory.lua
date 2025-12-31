@@ -1,4 +1,17 @@
-local Setup = {}
+--[[
+	Factory - Creación y configuración de NPCs
+
+	Proporciona:
+	- Creación de grafos de navegación
+	- Spawn de NPCs con Pawn y Controller
+	- Spawn masivo desde listas de configuración
+]]
+
+local Pawn = require(script.Parent.NPC.Pawn)
+local Registry = require(script.Parent.Registry)
+local Controller = require(script.Parent.NPC.Controller)
+
+local Factory = {}
 
 --[[
 	CreateNavigationGraphFromFolder - Crea un grafo de navegación desde carpetas
@@ -22,7 +35,7 @@ local Setup = {}
 	    - ignoreList: (table) Instancias a ignorar en raycast
 	    - debug: (table) Configuración de logging { nodeSearch, astar, loading }
 ]]
-function Setup.CreateNavigationGraphFromFolder(nodesFolder, options)
+function Factory.CreateNavigationGraphFromFolder(nodesFolder, options)
 	options = options or {}
 	local NavigationGraph = require(script.Parent.NavigationGraph)
 
@@ -79,32 +92,29 @@ function Setup.CreateNavigationGraphFromFolder(nodesFolder, options)
 	return graph
 end
 
-function Setup.GetPatrolNodesFromNames(nodesFolder, nodeNames)
-	local nodes = {}
+--[[
+	SpawnAndSetupNPC - Crea un NPC con Pawn y Controller
 
-	for _, nodeName in ipairs(nodeNames) do
-		local node = nodesFolder:FindFirstChild(nodeName)
-		if node and node:IsA("BasePart") then
-			table.insert(nodes, node)
-		end
-	end
-
-	return nodes
-end
-
-function Setup.SpawnAndSetupNPC(manager, template, graph, patrolRouteNames, config, parentFolder)
+	Retorna: npc (Instance), pawn (Pawn), controller (Controller), id (number)
+]]
+function Factory.SpawnAndSetupNPC(template, graph, patrolRouteNames, config, parentFolder)
 	if not template then
-		return nil, nil
+		return nil, nil, nil, nil
 	end
 
 	local npc = template:Clone()
 	npc.Parent = parentFolder or workspace
 
-	local NPCAIController = require(script.Parent.NPCAIController)
+	-- 1. Crear Pawn (representación física)
+	local pawn = Pawn.new(npc, config)
+	if not pawn then
+		npc:Destroy()
+		return nil, nil, nil, nil
+	end
 
+	-- 2. Preparar nodos de patrulla
 	local patrolNodes = {}
 	if patrolRouteNames and #patrolRouteNames > 0 then
-		-- Buscar nodos en el grafo (ahora están en memoria)
 		for _, nodeName in ipairs(patrolRouteNames) do
 			local nodeData = graph.nodes[nodeName]
 			if nodeData then
@@ -120,22 +130,34 @@ function Setup.SpawnAndSetupNPC(manager, template, graph, patrolRouteNames, conf
 	config = config or {}
 	config.patrolNodes = patrolNodes
 
-	local ai = NPCAIController.new(npc, graph, config)
-
-	if ai then
-		manager:RegisterNPC(ai)
-
-		if #patrolNodes > 0 then
-			local startNode = patrolNodes[1]
-			npc:PivotTo(CFrame.new(startNode.Position))
-		end
+	-- 3. Crear Controller (cerebro)
+	local controller = Controller.new(pawn, graph, config)
+	if not controller then
+		pawn:Destroy()
+		npc:Destroy()
+		return nil, nil, nil, nil
 	end
 
-	return npc, ai
+	-- 4. Registrar en el Registry singleton
+	local registry = Registry.GetInstance()
+	local id = registry:RegisterNPC(pawn, controller)
+
+	-- 5. Posicionar en inicio
+	if #patrolNodes > 0 then
+		local startNode = patrolNodes[1]
+		npc:PivotTo(CFrame.new(startNode.Position))
+	end
+
+	return npc, pawn, controller, id
 end
 
-function Setup.SpawnAllNPCs(manager, template, graph, npcSpawnList, baseConfig)
-	local DebugUtilities = require(script.Parent.DebugUtilities)
+--[[
+	SpawnAllNPCs - Spawn múltiples NPCs desde una lista de configuración
+
+	Retorna: tabla con { npc, pawn, controller, id, config } por cada NPC
+]]
+function Factory.SpawnAllNPCs(template, graph, npcSpawnList, baseConfig)
+	local Visualizer = require(script.Parent.Debug.Visualizer)
 	local isStudio = game:GetService("RunService"):IsStudio()
 
 	local spawnedNPCs = {}
@@ -159,8 +181,7 @@ function Setup.SpawnAllNPCs(manager, template, graph, npcSpawnList, baseConfig)
 		end
 
 		-- Spawn del NPC
-		local npc, ai = Setup.SpawnAndSetupNPC(
-			manager,
+		local npc, pawn, controller, id = Factory.SpawnAndSetupNPC(
 			template,
 			graph,
 			npcConfig.patrolRoute,
@@ -168,18 +189,29 @@ function Setup.SpawnAllNPCs(manager, template, graph, npcSpawnList, baseConfig)
 			npcsFolder
 		)
 
-		if npc and ai then
+		if npc and pawn and controller then
 			npc.Name = npcConfig.name or ("NPC_" .. i)
 
 			-- Activar debug visual (solo en Studio)
 			if isStudio then
-				DebugUtilities.EnableNPCDebug(ai, {
-					showRaycast = true,
+				local DebugConfig = require(script.Parent.Parent.Config.DebugConfig)
+				Visualizer.EnableNPCDebug(controller, {
+					showRaycast = DebugConfig.visuals.showVisionRays,
 					raycastDuration = 0.1,
+					showPath = DebugConfig.visuals.showNPCPaths,
+					pathDuration = DebugConfig.visuals.pathDuration or 3,
+					showLastSeenPosition = DebugConfig.visuals.showLastSeenPosition,
+					showDebugLabels = DebugConfig.visuals.showDebugLabels,
 				})
 			end
 
-			table.insert(spawnedNPCs, { npc = npc, ai = ai, config = npcConfig })
+			table.insert(spawnedNPCs, {
+				npc = npc,
+				pawn = pawn,
+				controller = controller,
+				id = id,
+				config = npcConfig
+			})
 		end
 
 		-- Pequeño delay entre spawns para evitar colisiones
@@ -189,4 +221,4 @@ function Setup.SpawnAllNPCs(manager, template, graph, npcSpawnList, baseConfig)
 	return spawnedNPCs
 end
 
-return Setup
+return Factory

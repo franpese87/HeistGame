@@ -1,11 +1,20 @@
-local CombatSystem = {}
-CombatSystem.__index = CombatSystem
+--[[
+	Combat - Componente de combate para NPCs
 
-function CombatSystem.new(npc, config)
-	local self = setmetatable({}, CombatSystem)
+	Gestiona:
+	- Rangos de ataque
+	- Cooldowns
+	- Daño
+]]
+
+local Combat = {}
+Combat.__index = Combat
+
+function Combat.new(npc, config)
+	local self = setmetatable({}, Combat)
 
 	self.npc = npc
-	
+
 	-- Configuración
 	config = config or {}
 	self.attackRange = config.attackRange or 5
@@ -18,9 +27,9 @@ function CombatSystem.new(npc, config)
 	return self
 end
 
-function CombatSystem:CanAttack(target)
+function Combat:CanAttack(target)
 	if not target then return false end
-	
+
 	-- Check cooldown
 	if tick() - self.lastAttackTime < self.attackCooldown then
 		return false
@@ -29,14 +38,14 @@ function CombatSystem:CanAttack(target)
 	-- Check distancia
 	local myRoot = self.npc:FindFirstChild("HumanoidRootPart")
 	local targetRoot = target:FindFirstChild("HumanoidRootPart")
-	
+
 	if not myRoot or not targetRoot then return false end
 
 	local distance = (myRoot.Position - targetRoot.Position).Magnitude
 	return distance <= (self.attackRange + 1) -- Pequeño buffer para asegurar hits
 end
 
-function CombatSystem:TryAttack(target)
+function Combat:TryAttack(target)
 	if not self:CanAttack(target) then
 		return false
 	end
@@ -51,4 +60,4 @@ function CombatSystem:TryAttack(target)
 	return false
 end
 
-return CombatSystem
+return Combat

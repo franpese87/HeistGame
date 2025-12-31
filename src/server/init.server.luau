@@ -34,28 +34,28 @@ if not npcTemplate then
 	error("❌ No se encontró NPCTemplate en ServerStorage")
 end
 
-local npcManager = NPCAISystem.Manager.new()
-
 -- Inyectar logging config en NPCBaseConfig
 local npcConfigWithLogging = table.clone(NPCBaseConfig)
 npcConfigWithLogging.logging = DebugConfig.logging
 
+-- SpawnAllNPCs ahora registra automáticamente en el Registry singleton
 local spawnedNPCs = NPCAISystem.Setup.SpawnAllNPCs(
-	npcManager,
 	npcTemplate,
 	navGraph,
 	NPCSpawnList,
 	npcConfigWithLogging
 )
 
-npcManager:Start()
+-- Obtener registry e iniciar loop de actualización
+local registry = NPCAISystem.GetRegistry()
+registry:Start()
 
 -- ==============================================================================
 -- 3. REPORTE Y DEBUG (SOLO STUDIO)
 -- ==============================================================================
 
 NPCAISystem.DebugUtilities.PrintSystemReport(
-	npcManager,
+	registry,
 	navGraph,
 	spawnedNPCs,
 	NPCBaseConfig,
