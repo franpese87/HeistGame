@@ -7,7 +7,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Debris = game:GetService("Debris")
-local NoiseService = require(script.Parent.Parent.NPCAISystem.NoiseService)
+local NoiseService = require(script.Parent.Parent.Services.NoiseService)
 local DebugConfig = require(script.Parent.Parent.Config.DebugConfig)
 
 -- Constantes

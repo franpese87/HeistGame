@@ -1,6 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Janitor = require(ReplicatedStorage.Packages.janitor)
-local NoiseService = require(script.Parent.Parent.NoiseService)
+local NoiseService = require(script.Parent.Parent.Parent.Services.NoiseService)
 
 local HearingSensor = {}
 HearingSensor.__index = HearingSensor

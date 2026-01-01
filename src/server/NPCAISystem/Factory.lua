@@ -37,7 +37,7 @@ local Factory = {}
 ]]
 function Factory.CreateNavigationGraphFromFolder(nodesFolder, options)
 	options = options or {}
-	local NavigationGraph = require(script.Parent.NavigationGraph)
+	local NavigationGraph = require(script.Parent.Parent.Services.NavigationGraph)
 
 	-- Configuración del grafo
 	local graphConfig = {

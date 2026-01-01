@@ -32,8 +32,8 @@
 
 local NPCAISystem = {}
 
--- Módulos de infraestructura (raíz)
-NPCAISystem.NavigationGraph = require(script.NavigationGraph)
+-- Servicios externos (src/server/Services/)
+NPCAISystem.NavigationGraph = require(script.Parent.Services.NavigationGraph)
 NPCAISystem.Factory = require(script.Factory)
 NPCAISystem.Registry = require(script.Registry)
 
