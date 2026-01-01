@@ -25,6 +25,9 @@ local AIState = {
 	RETURNING = "Returning"
 }
 
+-- Constantes
+local ARRIVAL_THRESHOLD = 3
+
 local Controller = {}
 Controller.__index = Controller
 
@@ -118,6 +121,34 @@ function Controller:Log(category, message)
 end
 
 -- ==============================================================================
+-- NAVIGATION HELPERS
+-- ==============================================================================
+
+function Controller:ClearPath()
+	self.currentPath = nil
+	self.currentPathIndex = 1
+end
+
+function Controller:HasArrivedAt(position)
+	return (self.pawn:GetPosition() - position).Magnitude < ARRIVAL_THRESHOLD
+end
+
+function Controller:NavigateToPosition(position, mode)
+	if mode == "patrol" then
+		self.pawn:SetPatrolSpeed()
+	else
+		self.pawn:SetChaseSpeed()
+	end
+
+	if self.currentPath and #self.currentPath > 0 then
+		self.pawn:PlayAnimation(mode == "patrol" and "walk" or "run")
+		self:FollowCurrentPath()
+	else
+		self:CalculateGraphPathToPosition(position)
+	end
+end
+
+-- ==============================================================================
 -- MAIN UPDATE LOOP
 -- ==============================================================================
 
@@ -193,26 +224,16 @@ end
 -- ==============================================================================
 
 function Controller:UpdatePatrolling()
-	self.pawn:SetPatrolSpeed()
-
 	if #self.patrolNodes == 0 then return end
 
 	local targetNode = self.patrolNodes[self.currentPatrolIndex]
-	local distance = (self.pawn:GetPosition() - targetNode.Position).Magnitude
 
-	if distance < 3 then
+	if self:HasArrivedAt(targetNode.Position) then
 		self:ChangeState(AIState.OBSERVING)
 		return
 	end
 
-	-- Usar grafo para navegar entre nodos de patrulla
-	if self.currentPath and #self.currentPath > 0 then
-		self.pawn:PlayAnimation("walk")
-		self:FollowCurrentPath()
-	else
-		-- Calcular ruta al siguiente nodo de patrulla
-		self:CalculateGraphPathToPosition(targetNode.Position)
-	end
+	self:NavigateToPosition(targetNode.Position, "patrol")
 end
 
 function Controller:MoveToNextPatrolNode()
@@ -221,9 +242,7 @@ function Controller:MoveToNextPatrolNode()
 	if self.currentPatrolIndex > #self.patrolNodes then
 		self.currentPatrolIndex = 1
 	end
-	-- El path se calculará en UpdatePatrolling
-	self.currentPath = nil
-	self.currentPathIndex = 1
+	self:ClearPath()
 end
 
 -- ==============================================================================
@@ -335,16 +354,12 @@ function Controller:ChaseUsingGraph(targetRoot)
 	local npcPos = self.pawn:GetPosition()
 	local currentTargetNode = self.currentPath[self.currentPathIndex]
 
-	if currentTargetNode then
-		local distToCurrentNode = (npcPos - currentTargetNode.position).Magnitude
+	if currentTargetNode and self:HasArrivedAt(currentTargetNode.position) then
+		local targetMoved = self.targetLastPosition and (targetPosition - self.targetLastPosition).Magnitude > 10
 
-		if distToCurrentNode < 3 then
-			local targetMoved = self.targetLastPosition and (targetPosition - self.targetLastPosition).Magnitude > 10
-
-			if targetMoved then
-				self:CalculateGraphPathToPosition(targetPosition)
-				self.targetLastPosition = targetPosition
-			end
+		if targetMoved then
+			self:CalculateGraphPathToPosition(targetPosition)
+			self.targetLastPosition = targetPosition
 		end
 	end
 
@@ -405,10 +420,9 @@ function Controller:FollowCurrentPath()
 	end
 
 	local targetNode = self.currentPath[self.currentPathIndex]
-	local distance = (self.pawn:GetPosition() - targetNode.position).Magnitude
 	self.pawn:MoveTo(targetNode.position)
 
-	if distance < 3 then
+	if self:HasArrivedAt(targetNode.position) then
 		self.currentPathIndex = self.currentPathIndex + 1
 		self.timeStartedMovingToNode = tick()
 		if self.currentPathIndex > #self.currentPath then
@@ -507,8 +521,7 @@ function Controller:ExitInvestigating()
 	self.investigationStartTime = nil
 	self.investigationTarget = nil
 	self.pawn:SetAutoRotate(true)
-	self.currentPath = nil
-	self.currentPathIndex = 1
+	self:ClearPath()
 
 	if self.debugEnabled and self.debugConfig.showLastSeenPosition then
 		Visualizer.ClearLastSeenPosition(self.pawn:GetName())
@@ -529,33 +542,17 @@ function Controller:EnterReturning()
 end
 
 function Controller:UpdateReturning()
-	self.pawn:SetPatrolSpeed()
-
-	if not self.returnTargetNode then
+	if not self.returnTargetNode or self:HasArrivedAt(self.returnTargetNode.Position) then
 		self:ChangeState(AIState.PATROLLING)
 		return
 	end
 
-	local distance = (self.pawn:GetPosition() - self.returnTargetNode.Position).Magnitude
-	if distance < 3 then
-		self:ChangeState(AIState.PATROLLING)
-		return
-	end
-
-	-- Usar grafo para volver al nodo de patrulla
-	if self.currentPath and #self.currentPath > 0 then
-		self.pawn:PlayAnimation("walk")
-		self:FollowCurrentPath()
-	else
-		-- Recalcular ruta si no hay path
-		self:CalculateGraphPathToPosition(self.returnTargetNode.Position)
-	end
+	self:NavigateToPosition(self.returnTargetNode.Position, "patrol")
 end
 
 function Controller:ExitReturning()
 	self.returnTargetNode = nil
-	self.currentPath = nil
-	self.currentPathIndex = 1
+	self:ClearPath()
 end
 
 function Controller:GetNearestPatrolNode()
@@ -604,8 +601,7 @@ function Controller:ChangeState(newState)
 	elseif newState == AIState.INVESTIGATING then
 		self:EnterInvestigating()
 	elseif newState == AIState.CHASING then
-		self.currentPath = nil
-		self.currentPathIndex = 1
+		self:ClearPath()
 		self.targetLastPosition = nil
 	elseif newState == AIState.RETURNING then
 		self:EnterReturning()
