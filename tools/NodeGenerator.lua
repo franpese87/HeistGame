@@ -61,15 +61,18 @@ local function countExistingNodes(floorFolder)
 	return count
 end
 
-local function calculateGridParams(size, desiredSpacing)
-	if size <= 0 then
+local NODE_SIZE = 1 -- Tamaño del nodo (cubo 1x1x1)
+local NODE_HALF = NODE_SIZE / 2
+
+local function calculateGridParams(usableSize, desiredSpacing)
+	if usableSize <= 0 then
 		return 1, 0
 	end
 
-	local numNodes = math.max(1, math.round(size / desiredSpacing) + 1)
+	local numNodes = math.max(1, math.round(usableSize / desiredSpacing) + 1)
 	local actualSpacing = 0
 	if numNodes > 1 then
-		actualSpacing = size / (numNodes - 1)
+		actualSpacing = usableSize / (numNodes - 1)
 	end
 
 	return numNodes, actualSpacing
@@ -79,9 +82,14 @@ local function generateNodesInZone(zonePart, globalSpacing, nodesRoot)
 	local pos = zonePart.Position
 	local size = zonePart.Size
 
-	local minX = pos.X - size.X / 2
-	local minZ = pos.Z - size.Z / 2
-	local baseY = pos.Y - size.Y / 2 + 0.5
+	-- Calcular área usable restando el tamaño del nodo (margen de 0.5 en cada lado)
+	local usableSizeX = math.max(0, size.X - NODE_SIZE)
+	local usableSizeZ = math.max(0, size.Z - NODE_SIZE)
+
+	-- Posición inicial con offset para que el borde del nodo toque el borde de la zona
+	local minX = pos.X - size.X / 2 + NODE_HALF
+	local minZ = pos.Z - size.Z / 2 + NODE_HALF
+	local baseY = pos.Y - size.Y / 2 + NODE_HALF
 
 	local floor = zonePart:GetAttribute("floor")
 	if floor == nil then
@@ -91,8 +99,8 @@ local function generateNodesInZone(zonePart, globalSpacing, nodesRoot)
 
 	local spacing = zonePart:GetAttribute("spacing") or globalSpacing
 
-	local numNodesX, spacingX = calculateGridParams(size.X, spacing)
-	local numNodesZ, spacingZ = calculateGridParams(size.Z, spacing)
+	local numNodesX, spacingX = calculateGridParams(usableSizeX, spacing)
+	local numNodesZ, spacingZ = calculateGridParams(usableSizeZ, spacing)
 
 	print(string.format("  [%s] %.0fx%.0f -> %dx%d nodos (spacing: %.2f)",
 		zonePart.Name, size.X, size.Z, numNodesX, numNodesZ, (spacingX + spacingZ) / 2))
