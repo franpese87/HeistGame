@@ -1,0 +1,9 @@
+{
+  "name": "NodeGeneratorPlugin",
+  "tree": {
+    "$className": "Folder",
+    "NodeGeneratorPlugin": {
+      "$path": "tools/plugins/NodeGenerator/NodeGeneratorPlugin.server.lua"
+    }
+  }
+}

@@ -12,7 +12,7 @@ print("🎮 Iniciando sistema de NPCs...")
 -- 1. CREAR GRAFO DE NAVEGACIÓN
 -- ==============================================================================
 
-local navGraph = NPCAISystem.Setup.CreateNavigationGraphFromFolder(
+local navGraph = NPCAISystem.Factory.CreateNavigationGraphFromFolder(
 	workspace.NavigationNodes,
 	{
 		mode = "hybrid",
@@ -39,7 +39,7 @@ local npcConfigWithLogging = table.clone(NPCBaseConfig)
 npcConfigWithLogging.logging = DebugConfig.logging
 
 -- SpawnAllNPCs ahora registra automáticamente en el Registry singleton
-local spawnedNPCs = NPCAISystem.Setup.SpawnAllNPCs(
+local spawnedNPCs = NPCAISystem.Factory.SpawnAllNPCs(
 	npcTemplate,
 	navGraph,
 	NPCSpawnList,
@@ -54,7 +54,7 @@ registry:Start()
 -- 3. REPORTE Y DEBUG (SOLO STUDIO)
 -- ==============================================================================
 
-NPCAISystem.DebugUtilities.PrintSystemReport(
+NPCAISystem.Visualizer.PrintSystemReport(
 	registry,
 	navGraph,
 	spawnedNPCs,
@@ -63,5 +63,5 @@ NPCAISystem.DebugUtilities.PrintSystemReport(
 )
 
 if isStudio and DebugConfig.visualizeOnStartup then
-	NPCAISystem.DebugUtilities.DrawAll(navGraph, DebugConfig)
+	NPCAISystem.Visualizer.DrawAll(navGraph, DebugConfig)
 end

@@ -10,18 +10,7 @@ local NoiseService = {}
 NoiseService.NoiseDetected = Signal.new()
 NoiseService.debug = true -- Bandera para controlar la visualización de ruidos
 
--- |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| --
--- GESTIÓN DE OYENTES (DEPRECATED - Migrado a Signal)
--- |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| --
-
--- Estos métodos se mantienen por compatibilidad pero ya no se usan
--- Los listeners ahora se conectan directamente a NoiseService.NoiseDetected:Connect()
-
--- |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| --
--- CREACIÓN DE RUIDO
--- |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| --
-
-function NoiseService.MakeNoise(position, range, _travelsThroughFloors)
+function NoiseService.MakeNoise(position, range)
 	if NoiseService.debug then
 		NoiseService.VisualizeNoise(position, range)
 	end

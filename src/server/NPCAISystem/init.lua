@@ -44,10 +44,6 @@ NPCAISystem.Controller = require(script.NPC.Controller)
 -- Debug (Debug/)
 NPCAISystem.Visualizer = require(script.Debug.Visualizer)
 
--- Aliases para compatibilidad (deprecated, usar nuevos nombres)
-NPCAISystem.Setup = NPCAISystem.Factory
-NPCAISystem.DebugUtilities = NPCAISystem.Visualizer
-
 -- Acceso directo al singleton (conveniencia)
 function NPCAISystem.GetRegistry()
 	return NPCAISystem.Registry.GetInstance()
