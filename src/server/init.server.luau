@@ -20,7 +20,6 @@ local navGraph = NPCAISystem.Factory.CreateNavigationGraphFromFolder(
 		useRaycast = true,
 		maxConnectionsPerNode = 6,
 		ignoreList = { workspace.NavigationNodes },
-		destroyParts = not DebugConfig.keepNodesInWorkspace,
 		logging = DebugConfig.logging,
 	}
 )

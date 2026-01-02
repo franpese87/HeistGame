@@ -86,10 +86,7 @@ end
 	      ● Nodos (requieren atributo 'floor' manual)
 ]]
 
-function NavigationGraph:LoadFromFolderStructure(rootFolder, options)
-	options = options or {}
-	local shouldDestroyParts = options.destroyParts ~= false
-
+function NavigationGraph:LoadFromFolderStructure(rootFolder)
 	if not rootFolder then
 		warn("NavigationGraph: Carpeta raíz no proporcionada")
 		return nil
@@ -136,12 +133,8 @@ function NavigationGraph:LoadFromFolderStructure(rootFolder, options)
 	-- Construir spatial hash 2D después de cargar
 	self:BuildSpatialHash2D()
 
-	-- Limpiar Parts si se solicita
-	if shouldDestroyParts then
-		rootFolder:Destroy()
-	else
-		self:SetPartsDebugMode(rootFolder)
-	end
+	-- Limpiar Parts originales
+	rootFolder:Destroy()
 
 	-- Log resumen
 	local floorList = {}
@@ -197,24 +190,11 @@ function NavigationGraph:LoadNodesFromFolder(folder, inheritedMetadata, rootFold
 	return count
 end
 
--- Función auxiliar: Modo debug para Parts (transparentes, sin colisión)
-function NavigationGraph:SetPartsDebugMode(folder)
-	for _, child in ipairs(folder:GetDescendants()) do
-		if child:IsA("BasePart") then
-			child.Transparency = 0.8
-			child.CanCollide = false
-			child.CanQuery = false
-		end
-	end
-end
-
 -- ==============================================================================
 -- CARGA DE NODOS DESDE PARTS (LEGACY - mantener compatibilidad)
 -- ==============================================================================
 
-function NavigationGraph:LoadFromParts(partsFolder, shouldDestroyParts)
-	shouldDestroyParts = shouldDestroyParts ~= false
-	
+function NavigationGraph:LoadFromParts(partsFolder)
 	if not partsFolder then
 		warn("⚠️ Folder de nodos no proporcionado")
 		return
@@ -245,19 +225,8 @@ function NavigationGraph:LoadFromParts(partsFolder, shouldDestroyParts)
 		end
 	end
 	
-	-- Destruir o transparentar las Parts
-	if shouldDestroyParts then
-		partsFolder:Destroy()
-	else
-		-- Hacerlas transparentes para debug
-		for _, part in ipairs(partsFolder:GetChildren()) do
-			if part:IsA("BasePart") then
-				part.Transparency = 0.8
-				part.CanCollide = false
-				part.CanQuery = false
-			end
-		end
-	end
+	-- Destruir las Parts originales
+	partsFolder:Destroy()
 
 	-- Construir spatial hash automáticamente después de cargar nodos
 	self:BuildSpatialHash2D()

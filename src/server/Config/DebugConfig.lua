@@ -5,11 +5,10 @@ return {
 	-- ==============================================================================
 	-- VISUALIZACIÓN DEL GRAFO
 	-- ==============================================================================
-	keepNodesInWorkspace = false,
 	visualizeOnStartup = true,
 
 	-- Qué visualizar
-	showNodes = false,
+	showNodes = true,
 	showCells = false,
 	showConnections = false,
 	showLabels = false,          -- Muestra etiquetas de texto en nodos y celdas del grafo

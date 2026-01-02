@@ -23,7 +23,6 @@ local Factory = {}
 	      ▼ Stairs
 
 	- options:
-	    - destroyParts: (bool) Destruir Parts después de cargar (default: true)
 	    - cellSizeX: (number) Tamaño de celda X para spatial hash (default: 16)
 	    - cellSizeZ: (number) Tamaño de celda Z para spatial hash (default: 14)
 	    - floorHeight: (number) Altura de cada piso (default: 10)
@@ -38,6 +37,12 @@ local Factory = {}
 function Factory.CreateNavigationGraphFromFolder(nodesFolder, options)
 	options = options or {}
 	local NavigationGraph = require(script.Parent.Parent.Services.NavigationGraph)
+
+	-- Eliminar NodeZones primero para no interferir con raycasts
+	local nodeZones = workspace:FindFirstChild("NodeZones")
+	if nodeZones then
+		nodeZones:Destroy()
+	end
 
 	-- Configuración del grafo
 	local graphConfig = {
@@ -66,16 +71,10 @@ function Factory.CreateNavigationGraphFromFolder(nodesFolder, options)
 	-- Cargar nodos
 	if hasFloorFolders then
 		-- Nueva estructura de carpetas
-		graph:LoadFromFolderStructure(nodesFolder, {
-			destroyParts = options.destroyParts ~= false,
-		})
+		graph:LoadFromFolderStructure(nodesFolder)
 	else
 		-- Legacy: carpeta plana con Parts
-		local shouldDestroyParts = options.destroyParts
-		if shouldDestroyParts == nil then
-			shouldDestroyParts = true
-		end
-		graph:LoadFromParts(nodesFolder, shouldDestroyParts)
+		graph:LoadFromParts(nodesFolder)
 	end
 
 	-- Auto-conectar si se especificó modo
