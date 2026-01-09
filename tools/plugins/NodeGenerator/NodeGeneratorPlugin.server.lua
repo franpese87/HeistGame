@@ -80,7 +80,8 @@ local function generateNodesInZone(zonePart, globalSpacing, nodesRoot)
 	-- Posición inicial con offset para que el borde del nodo toque el borde de la zona
 	local minX = pos.X - size.X / 2 + NODE_HALF
 	local minZ = pos.Z - size.Z / 2 + NODE_HALF
-	local baseY = pos.Y - size.Y / 2 + NODE_HALF
+	-- La base del nodo se alinea con la parte superior de la zona
+	local baseY = pos.Y + size.Y / 2 + NODE_HALF
 
 	local floor = zonePart:GetAttribute("floor") or 0
 	local spacing = zonePart:GetAttribute("spacing") or globalSpacing
