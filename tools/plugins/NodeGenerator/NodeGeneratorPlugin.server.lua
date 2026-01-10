@@ -13,6 +13,10 @@ local ZONES_FOLDER_NAME = "NodeZones"
 local NODES_FOLDER_NAME = "NavigationNodes"
 local DEFAULT_SPACING = 2
 
+-- Configuración de conexiones
+local MAX_CONNECTION_DISTANCE = 20
+local MAX_CONNECTIONS_PER_NODE = 6
+
 -- Colores por piso
 local FLOOR_COLORS = {
 	[0] = Color3.fromRGB(0, 255, 0),
@@ -55,6 +59,86 @@ end
 local NODE_SIZE = 1 -- Tamaño del nodo (cubo 1x1x1)
 local NODE_HALF = NODE_SIZE / 2
 
+-- Configuración de navegación
+-- AGENT_RADIUS: Radio de seguridad alrededor de obstáculos. El plugin hace raycasts
+-- en múltiples direcciones para verificar que no hay obstáculos dentro de este radio.
+-- Valor típico para humanoides de Roblox: 1.5-2.0 studs (ancho ~2 studs, radio ~1)
+local DEFAULT_AGENT_RADIUS = 1.5
+
+-- Direcciones para raycasts (8 direcciones cardinales en el plano XZ)
+local RAYCAST_DIRECTIONS = {
+	Vector3.new(1, 0, 0),
+	Vector3.new(-1, 0, 0),
+	Vector3.new(0, 0, 1),
+	Vector3.new(0, 0, -1),
+	Vector3.new(1, 0, 1).Unit,
+	Vector3.new(1, 0, -1).Unit,
+	Vector3.new(-1, 0, 1).Unit,
+	Vector3.new(-1, 0, -1).Unit,
+}
+
+local function isPositionWalkable(position, ignoreList, agentRadius)
+	local searchRadius = math.max(agentRadius, 0.5)
+
+	local overlapParams = OverlapParams.new()
+	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+	overlapParams.FilterDescendantsInstances = ignoreList or {}
+
+	-- Paso 1: Buscar partes colisionables cercanas y verificar distancia
+	local partsInRadius = workspace:GetPartBoundsInRadius(position, searchRadius + 2, overlapParams)
+
+	for _, part in ipairs(partsInRadius) do
+		if part.CanCollide then
+			local relativePos = part.CFrame:PointToObjectSpace(position)
+			local halfSize = part.Size / 2
+
+			-- Verificar si estamos DENTRO de la parte
+			if math.abs(relativePos.X) < halfSize.X and
+			   math.abs(relativePos.Y) < halfSize.Y and
+			   math.abs(relativePos.Z) < halfSize.Z then
+				return false -- Nodo dentro de geometría sólida
+			end
+
+			-- Verificar si estamos demasiado CERCA de la parte (dentro del agentRadius)
+			-- Solo para partes que son obstáculos LATERALES (paredes, columnas), no suelo
+			local partMaxY = part.Position.Y + halfSize.Y
+
+			-- Ignorar partes que están completamente debajo del nodo (suelo)
+			-- El nodo está "encima" si su base (nodeY - 0.5) está por encima del tope de la parte
+			local nodeBaseY = position.Y - NODE_HALF
+			local isAbovePart = nodeBaseY >= partMaxY - 0.1
+
+			-- Solo verificar distancia lateral si el nodo NO está encima de la parte
+			if not isAbovePart then
+				-- Calcular distancia al borde más cercano en el plano XZ
+				local distX = math.max(0, math.abs(relativePos.X) - halfSize.X)
+				local distZ = math.max(0, math.abs(relativePos.Z) - halfSize.Z)
+				local distToBorder = math.sqrt(distX * distX + distZ * distZ)
+
+				if distToBorder < agentRadius then
+					return false -- Nodo demasiado cerca del borde de la parte
+				end
+			end
+		end
+	end
+
+	-- Paso 2: Raycasts adicionales para formas complejas (cilindros, wedges, etc.)
+	if agentRadius > 0 then
+		local rayParams = RaycastParams.new()
+		rayParams.FilterType = Enum.RaycastFilterType.Exclude
+		rayParams.FilterDescendantsInstances = ignoreList or {}
+
+		for _, direction in ipairs(RAYCAST_DIRECTIONS) do
+			local result = workspace:Raycast(position, direction * agentRadius, rayParams)
+			if result then
+				return false -- Hay un obstáculo dentro del radio de seguridad
+			end
+		end
+	end
+
+	return true
+end
+
 local function calculateGridParams(usableSize, desiredSpacing)
 	if usableSize <= 0 then
 		return 1, 0
@@ -69,17 +153,18 @@ local function calculateGridParams(usableSize, desiredSpacing)
 	return numNodes, actualSpacing
 end
 
-local function generateNodesInZone(zonePart, globalSpacing, nodesRoot)
+local function generateNodesInZone(zonePart, globalSpacing, nodesRoot, zonesFolder, agentRadius)
 	local pos = zonePart.Position
 	local size = zonePart.Size
 
-	-- Calcular área usable restando el tamaño del nodo (margen de 0.5 en cada lado)
-	local usableSizeX = math.max(0, size.X - NODE_SIZE)
-	local usableSizeZ = math.max(0, size.Z - NODE_SIZE)
+	-- Usar el área completa de la zona (sin padding en bordes)
+	-- Las partes de límite del nivel serán detectadas por los raycasts de agentRadius
+	local usableSizeX = size.X
+	local usableSizeZ = size.Z
 
-	-- Posición inicial con offset para que el borde del nodo toque el borde de la zona
-	local minX = pos.X - size.X / 2 + NODE_HALF
-	local minZ = pos.Z - size.Z / 2 + NODE_HALF
+	-- Posición inicial desde el borde de la zona
+	local minX = pos.X - size.X / 2
+	local minZ = pos.Z - size.Z / 2
 	-- La base del nodo se alinea con la parte superior de la zona
 	local baseY = pos.Y + size.Y / 2 + NODE_HALF
 
@@ -92,30 +177,40 @@ local function generateNodesInZone(zonePart, globalSpacing, nodesRoot)
 	local floorFolder = getOrCreateFloorFolder(nodesRoot, floor)
 	local startIndex = countExistingNodes(floorFolder)
 
+	-- Lista de elementos a ignorar en el chequeo de colisión
+	local ignoreList = {nodesRoot, zonesFolder}
+
 	local nodeCount = 0
+	local discardedCount = 0
 	for ix = 0, numNodesX - 1 do
 		for iz = 0, numNodesZ - 1 do
 			local x = minX + ix * spacingX
 			local z = minZ + iz * spacingZ
+			local nodePosition = Vector3.new(x, baseY, z)
 
-			nodeCount = nodeCount + 1
+			-- Solo crear nodo si la posición es walkable (con padding de agentRadius)
+			if isPositionWalkable(nodePosition, ignoreList, agentRadius) then
+				nodeCount = nodeCount + 1
 
-			local node = Instance.new("Part")
-			node.Name = "Node_" .. floor .. "_" .. (startIndex + nodeCount)
-			node.Size = Vector3.new(1, 1, 1)
-			node.Position = Vector3.new(x, baseY, z)
-			node.Anchored = true
-			node.CanCollide = false
-			node.CanQuery = false
-			node.Color = getFloorColor(floor)
-			node.Material = Enum.Material.Neon
-			node.Transparency = 0.3
-			node:SetAttribute("floor", floor)
-			node.Parent = floorFolder
+				local node = Instance.new("Part")
+				node.Name = "Node_" .. floor .. "_" .. (startIndex + nodeCount)
+				node.Size = Vector3.new(1, 1, 1)
+				node.Position = nodePosition
+				node.Anchored = true
+				node.CanCollide = false
+				node.CanQuery = false
+				node.Color = getFloorColor(floor)
+				node.Material = Enum.Material.Neon
+				node.Transparency = 0.3
+				node:SetAttribute("floor", floor)
+				node.Parent = floorFolder
+			else
+				discardedCount = discardedCount + 1
+			end
 		end
 	end
 
-	return nodeCount, numNodesX, numNodesZ
+	return nodeCount, discardedCount, numNodesX, numNodesZ
 end
 
 local function clearNodes()
@@ -127,7 +222,89 @@ local function clearNodes()
 	return false
 end
 
-local function generateNodes(spacing)
+-- ============================================================================
+-- LÓGICA DE CONEXIONES
+-- ============================================================================
+
+local function canConnect(fromPos, toPos, nodesRoot)
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = {nodesRoot}
+
+	local direction = toPos - fromPos
+	local result = workspace:Raycast(fromPos, direction, rayParams)
+
+	if not result then
+		return true
+	end
+
+	local hitDistance = (result.Position - fromPos).Magnitude
+	local targetDistance = direction.Magnitude
+
+	return hitDistance >= targetDistance * 0.95
+end
+
+local function autoConnectNodes(nodesRoot)
+	local connectionCount = 0
+
+	-- Recolectar todos los nodos agrupados por piso
+	local nodesByFloor = {}
+	for _, floorFolder in ipairs(nodesRoot:GetChildren()) do
+		if floorFolder:IsA("Folder") then
+			local floorNumber = tonumber(string.match(floorFolder.Name, "Floor_(%-?%d+)"))
+			if floorNumber then
+				nodesByFloor[floorNumber] = {}
+				for _, node in ipairs(floorFolder:GetChildren()) do
+					if node:IsA("BasePart") then
+						table.insert(nodesByFloor[floorNumber], node)
+					end
+				end
+			end
+		end
+	end
+
+	-- Conectar nodos dentro del mismo piso
+	for _, nodesInFloor in pairs(nodesByFloor) do
+		for _, fromNode in ipairs(nodesInFloor) do
+			local candidates = {}
+
+			for _, toNode in ipairs(nodesInFloor) do
+				if fromNode ~= toNode then
+					local distance = (fromNode.Position - toNode.Position).Magnitude
+
+					if distance <= MAX_CONNECTION_DISTANCE then
+						if canConnect(fromNode.Position, toNode.Position, nodesRoot) then
+							table.insert(candidates, {node = toNode, distance = distance})
+						end
+					end
+				end
+			end
+
+			-- Ordenar por distancia y tomar los más cercanos
+			table.sort(candidates, function(a, b)
+				return a.distance < b.distance
+			end)
+
+			-- Guardar conexiones como atributo (lista de nombres separados por coma)
+			local connections = {}
+			for i, candidate in ipairs(candidates) do
+				if i > MAX_CONNECTIONS_PER_NODE then break end
+				table.insert(connections, candidate.node.Name)
+				connectionCount = connectionCount + 1
+			end
+
+			if #connections > 0 then
+				fromNode:SetAttribute("connections", table.concat(connections, ","))
+			end
+		end
+	end
+
+	return connectionCount
+end
+
+local function generateNodes(spacing, agentRadius)
+	agentRadius = agentRadius or DEFAULT_AGENT_RADIUS
+
 	local zonesFolder = workspace:FindFirstChild(ZONES_FOLDER_NAME)
 	if not zonesFolder then
 		return nil, "No se encontró carpeta '" .. ZONES_FOLDER_NAME .. "'"
@@ -151,20 +328,28 @@ local function generateNodes(spacing)
 	nodesRoot.Parent = workspace
 
 	local totalNodes = 0
+	local totalDiscarded = 0
 	local zoneResults = {}
 
 	for _, zonePart in ipairs(zones) do
-		local nodes, nx, nz = generateNodesInZone(zonePart, spacing, nodesRoot)
+		local nodes, discarded, nx, nz = generateNodesInZone(zonePart, spacing, nodesRoot, zonesFolder, agentRadius)
 		totalNodes = totalNodes + nodes
+		totalDiscarded = totalDiscarded + discarded
 		table.insert(zoneResults, {
 			name = zonePart.Name,
 			nodes = nodes,
+			discarded = discarded,
 			grid = nx .. "x" .. nz
 		})
 	end
 
+	-- Auto-conectar nodos después de generarlos todos
+	local totalConnections = autoConnectNodes(nodesRoot)
+
 	return {
 		totalNodes = totalNodes,
+		totalDiscarded = totalDiscarded,
+		totalConnections = totalConnections,
 		zonesCount = #zones,
 		zones = zoneResults
 	}
@@ -258,11 +443,43 @@ local inputCorner = Instance.new("UICorner")
 inputCorner.CornerRadius = UDim.new(0, 4)
 inputCorner.Parent = spacingInput
 
+-- Agent Radius input container
+local radiusContainer = Instance.new("Frame")
+radiusContainer.Size = UDim2.new(1, 0, 0, 28)
+radiusContainer.BackgroundTransparency = 1
+radiusContainer.LayoutOrder = 3
+radiusContainer.Parent = frame
+
+local radiusLabel = Instance.new("TextLabel")
+radiusLabel.Size = UDim2.new(0.5, 0, 1, 0)
+radiusLabel.BackgroundTransparency = 1
+radiusLabel.Text = "Agent Radius:"
+radiusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+radiusLabel.TextSize = 14
+radiusLabel.Font = Enum.Font.Gotham
+radiusLabel.TextXAlignment = Enum.TextXAlignment.Left
+radiusLabel.Parent = radiusContainer
+
+local radiusInput = Instance.new("TextBox")
+radiusInput.Size = UDim2.new(0.5, -5, 1, 0)
+radiusInput.Position = UDim2.new(0.5, 5, 0, 0)
+radiusInput.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+radiusInput.BorderSizePixel = 0
+radiusInput.Text = tostring(DEFAULT_AGENT_RADIUS)
+radiusInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+radiusInput.TextSize = 14
+radiusInput.Font = Enum.Font.GothamMedium
+radiusInput.Parent = radiusContainer
+
+local radiusCorner = Instance.new("UICorner")
+radiusCorner.CornerRadius = UDim.new(0, 4)
+radiusCorner.Parent = radiusInput
+
 -- Botones container
 local buttonsContainer = Instance.new("Frame")
 buttonsContainer.Size = UDim2.new(1, 0, 0, 32)
 buttonsContainer.BackgroundTransparency = 1
-buttonsContainer.LayoutOrder = 3
+buttonsContainer.LayoutOrder = 4
 buttonsContainer.Parent = frame
 
 local generateBtn = Instance.new("TextButton")
@@ -305,7 +522,7 @@ statusLabel.Font = Enum.Font.Gotham
 statusLabel.TextXAlignment = Enum.TextXAlignment.Left
 statusLabel.TextYAlignment = Enum.TextYAlignment.Top
 statusLabel.TextWrapped = true
-statusLabel.LayoutOrder = 4
+statusLabel.LayoutOrder = 5
 statusLabel.Parent = frame
 
 -- ============================================================================
@@ -318,18 +535,25 @@ end)
 
 generateBtn.MouseButton1Click:Connect(function()
 	local spacing = tonumber(spacingInput.Text) or DEFAULT_SPACING
+	local agentRadius = tonumber(radiusInput.Text) or DEFAULT_AGENT_RADIUS
 
 	statusLabel.Text = "Generando..."
 	statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
 
 	task.wait() -- Para que se actualice la UI
 
-	local result, err = generateNodes(spacing)
+	local result, err = generateNodes(spacing, agentRadius)
 
 	if result then
+		local discardedText = ""
+		if result.totalDiscarded > 0 then
+			discardedText = string.format(" (%d descartados)", result.totalDiscarded)
+		end
 		statusLabel.Text = string.format(
-			"%d nodos en %d zonas\nSpacing: %.2f studs",
+			"%d nodos%s, %d conexiones\n%d zonas, spacing: %.2f",
 			result.totalNodes,
+			discardedText,
+			result.totalConnections,
 			result.zonesCount,
 			spacing
 		)
@@ -350,12 +574,22 @@ clearBtn.MouseButton1Click:Connect(function()
 	end
 end)
 
--- Validar input numérico
+-- Validar inputs numéricos
 spacingInput.FocusLost:Connect(function()
 	local num = tonumber(spacingInput.Text)
 	if not num or num <= 0 then
 		spacingInput.Text = tostring(DEFAULT_SPACING)
 	else
 		spacingInput.Text = tostring(math.max(0.5, math.min(50, num)))
+	end
+end)
+
+radiusInput.FocusLost:Connect(function()
+	local num = tonumber(radiusInput.Text)
+	if not num or num < 0 then
+		radiusInput.Text = tostring(DEFAULT_AGENT_RADIUS)
+	else
+		-- Rango válido: 0 (sin padding) a 5 studs
+		radiusInput.Text = tostring(math.max(0, math.min(5, num)))
 	end
 end)

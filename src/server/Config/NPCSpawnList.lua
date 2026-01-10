@@ -4,11 +4,11 @@
 return {
 	{
 		name = "Guard_1",
-		patrolRoute = { "Node_0_30", "Node_0_194" },
+		patrolRoute = { "Node_0_22", "Node_0_151" },
 	},
 
 	{
 		name = "Guard_2",
-		patrolRoute = { "Node_0_106", "Node_0_98" },
+		patrolRoute = { "Node_0_65", "Node_0_77" },
 	},
 }
