@@ -218,59 +218,18 @@ function Visualizer.DrawConnections(graph, options)
 				print("[Visualizer] Reutilizando Beams del plugin (_ConnectionBeams)")
 				return pluginBeams
 			else
-				-- La carpeta existe pero está vacía, eliminarla
-				print("[Visualizer] Carpeta _ConnectionBeams vacía, eliminando...")
-				pluginBeams:Destroy()
+				-- La carpeta existe pero está vacía - el usuario desactivó el toggle
+				-- NO crear nuevos Beams, respetar la decisión del usuario
+				print("[Visualizer] Carpeta _ConnectionBeams vacía (toggle desactivado), no creando conexiones")
+				return pluginBeams -- Retornar la carpeta vacía para no crear duplicados
 			end
 		end
 	end
 
-	-- Si no existen Beams del plugin, crear los propios
-	local color = options.connectionColor or options.color or Color3.fromRGB(153, 202, 255)
-	local width = options.connectionWidth or options.width or 0.1
-
-	local folder = CreateDebugFolder("DEBUG_Connections")
-	local count = 0
-	local drawnConnections = {}
-
-	for name, node in pairs(graph.nodes) do
-		for _, connectedName in ipairs(node.connections) do
-			-- Evitar dibujar la misma conexión dos veces
-			local connectionKey1 = name .. "→" .. connectedName
-			local connectionKey2 = connectedName .. "→" .. name
-
-			if not drawnConnections[connectionKey1] and not drawnConnections[connectionKey2] then
-				local connectedNode = graph.nodes[connectedName]
-
-				if connectedNode then
-					-- Crear attachments en posiciones de los nodos
-					local att0 = Instance.new("Attachment")
-					att0.WorldPosition = node.position
-					att0.Parent = folder
-
-					local att1 = Instance.new("Attachment")
-					att1.WorldPosition = connectedNode.position
-					att1.Parent = folder
-
-					-- Crear beam entre ellos
-					local beam = Instance.new("Beam")
-					beam.Attachment0 = att0
-					beam.Attachment1 = att1
-					beam.Color = ColorSequence.new(color)
-					beam.Width0 = width
-					beam.Width1 = width
-					beam.FaceCamera = true
-					beam.Parent = att0
-
-					drawnConnections[connectionKey1] = true
-					count = count + 1
-				end
-			end
-		end
-	end
-
-	print("[Visualizer] Creados " .. count .. " Beams de conexiones")
-	return folder
+	-- Si no existe la carpeta _ConnectionBeams, no crear nada
+	-- Las conexiones solo se visualizan si se activa el toggle en el plugin
+	print("[Visualizer] No hay Beams del plugin. Usa 'Toggle Connection View' en el plugin para visualizar conexiones")
+	return nil
 end
 
 -- ==============================================================================
