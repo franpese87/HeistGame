@@ -204,9 +204,24 @@ function Visualizer.DrawConnections(graph, options)
 	if navNodes then
 		local pluginBeams = navNodes:FindFirstChild("_ConnectionBeams")
 		if pluginBeams then
-			-- Los Beams del plugin ya existen, no crear duplicados
-			print("[Visualizer] Reutilizando Beams del plugin (_ConnectionBeams)")
-			return pluginBeams
+			-- Verificar que los Beams son válidos (tienen al menos 1 Beam hijo)
+			local hasValidBeams = false
+			for _, child in ipairs(pluginBeams:GetChildren()) do
+				if child:IsA("Beam") then
+					hasValidBeams = true
+					break
+				end
+			end
+
+			if hasValidBeams then
+				-- Los Beams del plugin ya existen y son válidos
+				print("[Visualizer] Reutilizando Beams del plugin (_ConnectionBeams)")
+				return pluginBeams
+			else
+				-- La carpeta existe pero está vacía, eliminarla
+				print("[Visualizer] Carpeta _ConnectionBeams vacía, eliminando...")
+				pluginBeams:Destroy()
+			end
 		end
 	end
 

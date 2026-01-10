@@ -10,7 +10,7 @@ return {
 	-- Qué visualizar
 	showNodes = true,
 	showCells = false,
-	showConnections = false,
+	showConnections = true,
 
 	-- Estilo visual - Nodos
 	nodeColor = Color3.fromRGB(0, 255, 0),
