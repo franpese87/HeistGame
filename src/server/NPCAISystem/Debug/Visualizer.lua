@@ -375,10 +375,9 @@ function Visualizer.EnableNPCDebug(ai, options)
 		showRaycast = options.showRaycast or false,
 		raycastDuration = options.raycastDuration or 0.1,
 		showPath = options.showPath or false,
-		pathDuration = options.pathDuration or 3,
 		pathColor = options.pathColor or Color3.fromRGB(255, 165, 0),
 		showLastSeenPosition = options.showLastSeenPosition or false,
-		showDebugLabels = options.showDebugLabels ~= false, -- Default true
+		showDebugLabels = options.showDebugLabels ~= false,
 	}
 end
 
@@ -390,120 +389,101 @@ end
 -- VISUALIZACIÓN DE PATHS DE NPCs
 -- ==============================================================================
 
--- Cache de paths activos por NPC para fade out
-local activePathFolders = {}
+-- Atributos usados en las Parts para tracking:
+-- _pathOriginalColor: Color3 - color original antes de ser modificado
+-- _pathRefCount: number - cuántos NPCs están usando este nodo
 
-local function fadeOutFolder(folder, fadeDuration)
-	if not folder or not folder.Parent then return end
+-- Cache de nodos modificados por NPC (lista de Parts)
+local activePathParts = {}
 
-	local tweenInfo = TweenInfo.new(fadeDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+-- Busca la Part de un nodo en NavigationNodes (búsqueda recursiva)
+local function findNodePart(nodeName)
+	if not nodeName then return nil end
 
-	for _, part in ipairs(folder:GetDescendants()) do
-		if part:IsA("BasePart") then
-			local targetTransparency = 1
-			local tween = TweenService:Create(part, tweenInfo, { Transparency = targetTransparency })
-			tween:Play()
-		elseif part:IsA("TextLabel") then
-			local tween = TweenService:Create(part, tweenInfo, { TextTransparency = 1, TextStrokeTransparency = 1 })
-			tween:Play()
+	local navNodes = workspace:FindFirstChild("NavigationNodes")
+	if not navNodes then return nil end
+
+	local function searchInFolder(folder)
+		for _, child in ipairs(folder:GetChildren()) do
+			if child:IsA("BasePart") and child.Name == nodeName then
+				return child
+			elseif child:IsA("Folder") then
+				local found = searchInFolder(child)
+				if found then return found end
+			end
 		end
+		return nil
 	end
 
-	-- Destruir después del fade
-	Debris:AddItem(folder, fadeDuration + 0.1)
+	return searchInFolder(navNodes)
+end
+
+-- Libera los nodos de un NPC y restaura colores si ya no hay referencias
+local function releasePathParts(parts)
+	if not parts then return end
+
+	for _, part in ipairs(parts) do
+		if part and part.Parent then
+			local refCount = (part:GetAttribute("_pathRefCount") or 1) - 1
+			if refCount <= 0 then
+				-- Restaurar color original
+				local originalColor = part:GetAttribute("_pathOriginalColor")
+				if originalColor then
+					part.Color = originalColor
+				end
+				part:SetAttribute("_pathOriginalColor", nil)
+				part:SetAttribute("_pathRefCount", nil)
+			else
+				part:SetAttribute("_pathRefCount", refCount)
+			end
+		end
+	end
 end
 
 function Visualizer.DrawNPCPath(npcName, path, startIndex, options)
-	options = options or {}
-	local duration = options.duration or 3
-	local color = options.color or Color3.fromRGB(255, 165, 0)
-	local nodeSize = options.nodeSize or 0.8
-	local lineWidth = options.lineWidth or 0.15
-	local fadeDuration = options.fadeDuration or 0.5
-	local showLabels = options.showLabels ~= false
-
 	if not path or #path == 0 then return end
 
-	-- Fade out del path anterior si existe
-	local existingFolder = activePathFolders[npcName]
-	if existingFolder and existingFolder.Parent then
-		-- Cambiar nombre para evitar conflictos
-		existingFolder.Name = "DEBUG_Path_" .. npcName .. "_old"
-		fadeOutFolder(existingFolder, fadeDuration)
-	end
+	-- Requiere NavigationNodes en workspace para visualizar
+	if not workspace:FindFirstChild("NavigationNodes") then return end
 
-	-- Crear nuevo folder para este path
-	local folder = Instance.new("Folder")
-	folder.Name = "DEBUG_Path_" .. npcName
-	folder.Parent = workspace
+	options = options or {}
+	local color = options.color or Color3.fromRGB(255, 165, 0)
+
+	-- Liberar nodos del path anterior
+	releasePathParts(activePathParts[npcName])
+
+	-- Lista de Parts modificadas en este path
+	local modifiedParts = {}
+
+	-- Cambiar el color de los nodos del path
+	local actualStartIndex = startIndex or 1
+	for i = actualStartIndex, #path do
+		local node = path[i]
+		local nodePart = findNodePart(node.name)
+
+		if nodePart then
+			-- Guardar color original solo si es la primera referencia
+			if not nodePart:GetAttribute("_pathOriginalColor") then
+				nodePart:SetAttribute("_pathOriginalColor", nodePart.Color)
+				nodePart:SetAttribute("_pathRefCount", 0)
+			end
+			nodePart:SetAttribute("_pathRefCount", nodePart:GetAttribute("_pathRefCount") + 1)
+
+			-- Cambiar color
+			nodePart.Color = color
+			table.insert(modifiedParts, nodePart)
+		end
+	end
 
 	-- Guardar referencia
-	activePathFolders[npcName] = folder
+	activePathParts[npcName] = modifiedParts
 
-	-- Dibujar nodos del path
-	for i = startIndex or 1, #path do
-		local node = path[i]
-		local isCurrentTarget = (i == startIndex)
-
-		-- Esfera para el nodo
-		local sphere = Instance.new("Part")
-		sphere.Shape = Enum.PartType.Ball
-		sphere.Size = Vector3.new(nodeSize, nodeSize, nodeSize) * (isCurrentTarget and 1.5 or 1)
-		sphere.Position = node.position + Vector3.new(0, 0.5, 0)
-		sphere.Anchored = true
-		sphere.CanCollide = false
-		sphere.CanQuery = false
-		sphere.Color = isCurrentTarget and Color3.fromRGB(0, 255, 0) or color
-		sphere.Transparency = 0.3
-		sphere.Material = Enum.Material.Neon
-		sphere.Parent = folder
-
-		-- Número del nodo (solo si showLabels)
-		if showLabels then
-			CreateBillboardLabel(sphere, tostring(i), {
-				size = UDim2.fromOffset(30, 20),
-				offset = Vector3.new(0, 1, 0),
-				strokeTransparency = 0,
-			})
-		end
-
-		-- Línea al siguiente nodo
-		if i < #path then
-			local nextNode = path[i + 1]
-			local startPos = node.position + Vector3.new(0, 0.5, 0)
-			local endPos = nextNode.position + Vector3.new(0, 0.5, 0)
-			local distance = (endPos - startPos).Magnitude
-
-			local line = Instance.new("Part")
-			line.Size = Vector3.new(lineWidth, lineWidth, distance)
-			line.CFrame = CFrame.lookAt(startPos, endPos) * CFrame.new(0, 0, -distance / 2)
-			line.Anchored = true
-			line.CanCollide = false
-			line.CanQuery = false
-			line.Color = color
-			line.Transparency = 0.5
-			line.Material = Enum.Material.Neon
-			line.Parent = folder
-		end
-	end
-
-	-- Auto-fade y destruir después de duration segundos
-	task.delay(duration, function()
-		if folder and folder.Parent and activePathFolders[npcName] == folder then
-			fadeOutFolder(folder, fadeDuration)
-			activePathFolders[npcName] = nil
-		end
-	end)
-
-	return folder
+	return modifiedParts
 end
 
 function Visualizer.ClearNPCPath(npcName)
-	local folder = activePathFolders[npcName]
-	if folder and folder.Parent then
-		fadeOutFolder(folder, 0.3)
-		activePathFolders[npcName] = nil
-	end
+	releasePathParts(activePathParts[npcName])
+	activePathParts[npcName] = nil
 end
 
 -- ==============================================================================

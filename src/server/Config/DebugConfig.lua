@@ -33,10 +33,9 @@ return {
 	visuals = {
 		showVisionRays = true,     -- Muestra las líneas de visión (Verde/Rojo)
 		showNoiseSpheres = true,   -- Muestra esferas donde se generan ruidos
-		showNPCPaths = true,       -- Muestra la ruta actual del NPC cuando se calcula
-		pathDuration = 3,          -- Segundos que permanece visible la ruta
+		showNPCPaths = true,       -- Muestra la ruta actual del NPC cambiando color de nodos
 		showLastSeenPosition = true, -- Muestra esfera en la última posición detectada del target
-		showDebugLabels = true,    -- Muestra etiquetas de texto en los debugs visuales (paths, lastSeen)
+		showDebugLabels = true,    -- Muestra etiquetas de texto en lastSeenPosition
 	},
 
 	-- ==============================================================================

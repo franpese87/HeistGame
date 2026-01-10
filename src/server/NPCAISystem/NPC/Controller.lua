@@ -398,9 +398,7 @@ function Controller:CalculateGraphPathToPosition(targetPosition)
 
 		if self.debugEnabled and self.debugConfig.showPath then
 			Visualizer.DrawNPCPath(self.pawn:GetName(), path, self.currentPathIndex, {
-				duration = self.debugConfig.pathDuration,
 				color = self.debugConfig.pathColor,
-				showLabels = self.debugConfig.showDebugLabels,
 			})
 		end
 	else
