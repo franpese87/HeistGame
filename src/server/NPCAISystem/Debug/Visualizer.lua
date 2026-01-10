@@ -71,42 +71,11 @@ end
 
 function Visualizer.DrawNodes(graph, options)
 	options = options or {}
-	local showLabels = options.showLabels ~= false
 
 	-- Si NavigationNodes existe, las Parts ya están en workspace (generadas por el plugin)
-	-- No necesitamos crear nuevas Parts, solo añadir labels si se requiere
+	-- No necesitamos hacer nada, solo retornar la carpeta existente
 	local existingFolder = workspace:FindFirstChild("NavigationNodes")
 	if existingFolder then
-		if showLabels then
-			-- Añadir labels a las Parts existentes
-			for name, node in pairs(graph.nodes) do
-				-- Buscar la Part correspondiente en la estructura de carpetas
-				for _, floorFolder in ipairs(existingFolder:GetChildren()) do
-					if floorFolder:IsA("Folder") then
-						local part = floorFolder:FindFirstChild(name)
-						if part and part:IsA("BasePart") and not part:FindFirstChildOfClass("BillboardGui") then
-							local _, billboard = CreateBillboardLabel(part, name, {
-								textScaled = true,
-							})
-
-							if node.metadata and node.metadata.floor ~= 0 then
-								local floorLabel = Instance.new("TextLabel")
-								floorLabel.Size = UDim2.fromScale(1, 0.4)
-								floorLabel.Position = UDim2.fromScale(0, 0.6)
-								floorLabel.BackgroundTransparency = 1
-								floorLabel.Text = "Floor " .. node.metadata.floor
-								floorLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
-								floorLabel.TextScaled = true
-								floorLabel.Font = Enum.Font.SourceSans
-								floorLabel.TextStrokeTransparency = 0.5
-								floorLabel.Parent = billboard
-							end
-							break
-						end
-					end
-				end
-			end
-		end
 		return existingFolder
 	end
 
@@ -132,25 +101,6 @@ function Visualizer.DrawNodes(graph, options)
 		sphere.Material = Enum.Material.Neon
 		sphere.Parent = folder
 
-		if showLabels then
-			local _, billboard = CreateBillboardLabel(sphere, name, {
-				textScaled = true,
-			})
-
-			if node.metadata and node.metadata.floor ~= 0 then
-				local floorLabel = Instance.new("TextLabel")
-				floorLabel.Size = UDim2.fromScale(1, 0.4)
-				floorLabel.Position = UDim2.fromScale(0, 0.6)
-				floorLabel.BackgroundTransparency = 1
-				floorLabel.Text = "Floor " .. node.metadata.floor
-				floorLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
-				floorLabel.TextScaled = true
-				floorLabel.Font = Enum.Font.SourceSans
-				floorLabel.TextStrokeTransparency = 0.5
-				floorLabel.Parent = billboard
-			end
-		end
-
 		count = count + 1
 	end
 
@@ -170,7 +120,6 @@ function Visualizer.DrawCells(graph, options)
 	options = options or {}
 	local transparency = options.cellTransparency or options.transparency or 0.85
 	local wireframe = options.cellWireframe ~= false
-	local showLabels = options.showLabels ~= false
 	local cellHeight = options.cellHeight or graph.floorHeight or 10
 
 	-- Colores por piso
@@ -236,15 +185,6 @@ function Visualizer.DrawCells(graph, options)
 
 			cellPart.Parent = floorFolder
 
-			-- Etiqueta con información
-			if showLabels then
-				CreateBillboardLabel(cellPart, "F" .. floor .. " " .. cellKey .. "\n(" .. #nodes .. " nodos)", {
-					size = UDim2.fromOffset(120, 50),
-					offset = Vector3.new(0, cellHeight / 2 + 1, 0),
-					textScaled = true,
-				})
-			end
-
 			count = count + 1
 		end
 	end
@@ -258,6 +198,19 @@ end
 
 function Visualizer.DrawConnections(graph, options)
 	options = options or {}
+
+	-- Intentar reutilizar los Beams del plugin si existen
+	local navNodes = workspace:FindFirstChild("NavigationNodes")
+	if navNodes then
+		local pluginBeams = navNodes:FindFirstChild("_ConnectionBeams")
+		if pluginBeams then
+			-- Los Beams del plugin ya existen, no crear duplicados
+			print("[Visualizer] Reutilizando Beams del plugin (_ConnectionBeams)")
+			return pluginBeams
+		end
+	end
+
+	-- Si no existen Beams del plugin, crear los propios
 	local color = options.connectionColor or options.color or Color3.fromRGB(153, 202, 255)
 	local width = options.connectionWidth or options.width or 0.1
 
@@ -301,6 +254,7 @@ function Visualizer.DrawConnections(graph, options)
 		end
 	end
 
+	print("[Visualizer] Creados " .. count .. " Beams de conexiones")
 	return folder
 end
 
@@ -310,6 +264,37 @@ end
 
 function Visualizer.DrawAll(graph, options)
 	options = options or {}
+
+	-- Determinar si debemos mantener los Beams del plugin
+	local shouldKeepPluginBeams = (options.showNodes ~= false) and (options.showConnections ~= false)
+
+	-- Si NO debemos mantener los Beams del plugin, eliminarlos
+	if not shouldKeepPluginBeams then
+		local navNodes = workspace:FindFirstChild("NavigationNodes")
+		if navNodes then
+			local pluginBeams = navNodes:FindFirstChild("_ConnectionBeams")
+			if pluginBeams then
+				pluginBeams:Destroy()
+				print("[Visualizer] Eliminados Beams del plugin (showNodes o showConnections desactivado)")
+			end
+
+			-- Limpiar Attachments de los nodos
+			local function cleanAttachments(folder)
+				for _, child in ipairs(folder:GetChildren()) do
+					if child:IsA("BasePart") then
+						for _, att in ipairs(child:GetChildren()) do
+							if att:IsA("Attachment") and string.match(att.Name, "^BeamConn_") then
+								att:Destroy()
+							end
+						end
+					elseif child:IsA("Folder") then
+						cleanAttachments(child)
+					end
+				end
+			end
+			cleanAttachments(navNodes)
+		end
+	end
 
 	if options.showNodes ~= false then
 		Visualizer.DrawNodes(graph, options)
@@ -332,6 +317,32 @@ function Visualizer.ClearAll()
 		if folder then
 			folder:Destroy()
 		end
+	end
+
+	-- Limpiar también los Beams del plugin si existen
+	local navNodes = workspace:FindFirstChild("NavigationNodes")
+	if navNodes then
+		local pluginBeams = navNodes:FindFirstChild("_ConnectionBeams")
+		if pluginBeams then
+			pluginBeams:Destroy()
+			print("[Visualizer] Eliminados Beams del plugin (_ConnectionBeams)")
+		end
+
+		-- Limpiar Attachments de los nodos (BeamConn_*)
+		local function cleanAttachments(folder)
+			for _, child in ipairs(folder:GetChildren()) do
+				if child:IsA("BasePart") then
+					for _, att in ipairs(child:GetChildren()) do
+						if att:IsA("Attachment") and string.match(att.Name, "^BeamConn_") then
+							att:Destroy()
+						end
+					end
+				elseif child:IsA("Folder") then
+					cleanAttachments(child)
+				end
+			end
+		end
+		cleanAttachments(navNodes)
 	end
 end
 

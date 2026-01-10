@@ -11,7 +11,6 @@ return {
 	showNodes = true,
 	showCells = false,
 	showConnections = false,
-	showLabels = false,          -- Muestra etiquetas de texto en nodos y celdas del grafo
 
 	-- Estilo visual - Nodos
 	nodeColor = Color3.fromRGB(0, 255, 0),

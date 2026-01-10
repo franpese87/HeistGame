@@ -15,7 +15,7 @@ local DEFAULT_SPACING = 2
 
 -- Configuración de conexiones
 local MAX_CONNECTION_DISTANCE = 20
-local MAX_CONNECTIONS_PER_NODE = 6
+local MAX_CONNECTIONS_PER_NODE = 8
 
 -- Colores por piso (nodos caminables)
 local FLOOR_COLORS = {
@@ -389,9 +389,9 @@ local widgetInfo = DockWidgetPluginGuiInfo.new(
 	false, -- inicialmente cerrado
 	false,
 	300, -- ancho
-	200, -- alto
+	260, -- alto
 	250, -- ancho mínimo
-	150  -- alto mínimo
+	240  -- alto mínimo
 )
 
 local widget = plugin:CreateDockWidgetPluginGui("NodeGeneratorWidget", widgetInfo)
@@ -543,6 +543,133 @@ statusLabel.LayoutOrder = 5
 statusLabel.Parent = frame
 
 -- ============================================================================
+-- EDITOR MODE - Visualización de Conexiones con Beams
+-- ============================================================================
+
+local EditorMode = {
+	active = false,
+	beamsFolder = nil,
+}
+
+-- Busca un nodo por nombre en NavigationNodes
+local function findNodeByName(nodeName)
+	local navNodes = workspace:FindFirstChild(NODES_FOLDER_NAME)
+	if not navNodes then return nil end
+
+	local function searchInFolder(folder)
+		for _, child in ipairs(folder:GetChildren()) do
+			if child:IsA("BasePart") and child.Name == nodeName then
+				return child
+			elseif child:IsA("Folder") then
+				local found = searchInFolder(child)
+				if found then return found end
+			end
+		end
+		return nil
+	end
+
+	return searchInFolder(navNodes)
+end
+
+function EditorMode:Enable()
+	if self.active then return end
+
+	local navNodes = workspace:FindFirstChild(NODES_FOLDER_NAME)
+	if not navNodes then
+		statusLabel.Text = "No hay NavigationNodes"
+		statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+		return
+	end
+
+	self.active = true
+
+	-- Crear folder para los Beams dentro de NavigationNodes
+	self.beamsFolder = Instance.new("Folder")
+	self.beamsFolder.Name = "_ConnectionBeams"
+	self.beamsFolder.Parent = navNodes
+
+	local beamCount = 0
+
+	-- Recorrer todos los nodos y crear Beams para sus conexiones
+	local function processFolder(folder)
+		for _, child in ipairs(folder:GetChildren()) do
+			if child:IsA("BasePart") and child:GetAttribute("walkable") == true then
+				local connectionsStr = child:GetAttribute("connections")
+				if connectionsStr and connectionsStr ~= "" then
+					for _, targetName in ipairs(string.split(connectionsStr, ",")) do
+						local targetNode = findNodeByName(targetName)
+						if targetNode then
+							-- Crear Attachments
+							local att0 = Instance.new("Attachment")
+							att0.Name = "BeamConn_" .. targetName
+							att0.Parent = child
+
+							local att1 = Instance.new("Attachment")
+							att1.Name = "BeamConn_" .. child.Name
+							att1.Parent = targetNode
+
+							-- Crear Beam
+							local beam = Instance.new("Beam")
+							beam.Attachment0 = att0
+							beam.Attachment1 = att1
+							beam.Width0 = 0.15
+							beam.Width1 = 0.15
+							beam.FaceCamera = true
+							beam.Color = ColorSequence.new(Color3.fromRGB(100, 200, 255))
+							beam.Transparency = NumberSequence.new(0.3)
+							beam.Parent = self.beamsFolder
+
+							beamCount = beamCount + 1
+						end
+					end
+				end
+			elseif child:IsA("Folder") then
+				processFolder(child)
+			end
+		end
+	end
+
+	processFolder(navNodes)
+
+	statusLabel.Text = string.format("Editor Mode: %d conexiones visibles", beamCount)
+	statusLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
+end
+
+function EditorMode:Disable()
+	if not self.active then return end
+
+	self.active = false
+
+	-- Eliminar Beams y Attachments
+	if self.beamsFolder and self.beamsFolder.Parent then
+		self.beamsFolder:Destroy()
+	end
+	self.beamsFolder = nil
+
+	-- Limpiar Attachments de los nodos
+	local navNodes = workspace:FindFirstChild(NODES_FOLDER_NAME)
+	if navNodes then
+		local function cleanAttachments(folder)
+			for _, child in ipairs(folder:GetChildren()) do
+				if child:IsA("BasePart") then
+					for _, att in ipairs(child:GetChildren()) do
+						if att:IsA("Attachment") and string.match(att.Name, "^BeamConn_") then
+							att:Destroy()
+						end
+					end
+				elseif child:IsA("Folder") then
+					cleanAttachments(child)
+				end
+			end
+		end
+		cleanAttachments(navNodes)
+	end
+
+	statusLabel.Text = "Editor Mode desactivado"
+	statusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+end
+
+-- ============================================================================
 -- EVENTOS
 -- ============================================================================
 
@@ -581,6 +708,13 @@ generateBtn.MouseButton1Click:Connect(function()
 end)
 
 clearBtn.MouseButton1Click:Connect(function()
+	-- Resetear estado de Editor Mode si estaba activo
+	-- (Los Beams se auto-destruyen al eliminar NavigationNodes)
+	if EditorMode.active then
+		EditorMode.active = false
+		EditorMode.beamsFolder = nil
+	end
+
 	if clearNodes() then
 		statusLabel.Text = "Nodos eliminados"
 		statusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
@@ -607,5 +741,29 @@ radiusInput.FocusLost:Connect(function()
 	else
 		-- Rango válido: 0 (sin padding) a 5 studs
 		radiusInput.Text = tostring(math.max(0, math.min(5, num)))
+	end
+end)
+
+-- Botón para toggle Editor Mode (UI)
+local editorBtn = Instance.new("TextButton")
+editorBtn.Size = UDim2.new(1, 0, 0, 32)
+editorBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 200)
+editorBtn.BorderSizePixel = 0
+editorBtn.Text = "Toggle Connection View"
+editorBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+editorBtn.TextSize = 14
+editorBtn.Font = Enum.Font.GothamMedium
+editorBtn.LayoutOrder = 6
+editorBtn.Parent = frame
+
+local editorCorner = Instance.new("UICorner")
+editorCorner.CornerRadius = UDim.new(0, 4)
+editorCorner.Parent = editorBtn
+
+editorBtn.MouseButton1Click:Connect(function()
+	if EditorMode.active then
+		EditorMode:Disable()
+	else
+		EditorMode:Enable()
 	end
 end)

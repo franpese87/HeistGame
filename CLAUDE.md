@@ -152,8 +152,11 @@ NPCManager runs at 30 fps:
 - All game logic runs server-side (FilteringEnabled)
 - NoiseService uses Signal pattern for efficient global noise detection
 - Spatial hash cell sizes: 16x14 studs (configurable)
-- Maximum 6 connections per navigation node by default
+- **Maximum 8 connections per navigation node** (updated from 6 for complete grid connectivity)
 - All components use Janitor for automatic memory cleanup
+- **NodeGenerator plugin creates persistent Beams** in `NavigationNodes/_ConnectionBeams`
+  - Beams are reused by debug system when both `showNodes` and `showConnections` are enabled
+  - Auto-cleaned when either setting is disabled
 
 ## Recent Implementation Changes
 
@@ -170,3 +173,17 @@ NPCManager runs at 30 fps:
 - **Fixed Rojo configuration**
   - Removed non-existent DevPackages reference from default.project.json
   - Packages folder now syncs correctly to ReplicatedStorage
+
+### NodeGenerator Plugin Improvements (2026-01-10)
+- **Added Editor Mode** with visual connection display using Beams
+  - Toggle button in plugin UI to show/hide node connections
+  - Beams stored in `NavigationNodes/_ConnectionBeams` folder
+  - Auto-cleanup when using "Clear" button
+- **Increased max connections from 6 to 8**
+  - Ensures complete 8-directional connectivity in grid (4 cardinal + 4 diagonal)
+  - Fixes irregular connection patterns in obstacle-free areas
+- **Integration with debug system**
+  - `Visualizer.DrawConnections()` now reuses plugin Beams if present
+  - Beams automatically maintained when `showNodes=true` and `showConnections=true`
+  - Beams removed when either debug option is disabled
+- **Removed obsolete NodeGenerator.lua** (Command Bar version replaced by plugin)
