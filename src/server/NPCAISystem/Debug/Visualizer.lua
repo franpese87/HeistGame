@@ -71,16 +71,54 @@ end
 
 function Visualizer.DrawNodes(graph, options)
 	options = options or {}
+	local showLabels = options.showLabels ~= false
+
+	-- Si NavigationNodes existe, las Parts ya están en workspace (generadas por el plugin)
+	-- No necesitamos crear nuevas Parts, solo añadir labels si se requiere
+	local existingFolder = workspace:FindFirstChild("NavigationNodes")
+	if existingFolder then
+		if showLabels then
+			-- Añadir labels a las Parts existentes
+			for name, node in pairs(graph.nodes) do
+				-- Buscar la Part correspondiente en la estructura de carpetas
+				for _, floorFolder in ipairs(existingFolder:GetChildren()) do
+					if floorFolder:IsA("Folder") then
+						local part = floorFolder:FindFirstChild(name)
+						if part and part:IsA("BasePart") and not part:FindFirstChildOfClass("BillboardGui") then
+							local _, billboard = CreateBillboardLabel(part, name, {
+								textScaled = true,
+							})
+
+							if node.metadata and node.metadata.floor ~= 0 then
+								local floorLabel = Instance.new("TextLabel")
+								floorLabel.Size = UDim2.fromScale(1, 0.4)
+								floorLabel.Position = UDim2.fromScale(0, 0.6)
+								floorLabel.BackgroundTransparency = 1
+								floorLabel.Text = "Floor " .. node.metadata.floor
+								floorLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+								floorLabel.TextScaled = true
+								floorLabel.Font = Enum.Font.SourceSans
+								floorLabel.TextStrokeTransparency = 0.5
+								floorLabel.Parent = billboard
+							end
+							break
+						end
+					end
+				end
+			end
+		end
+		return existingFolder
+	end
+
+	-- Fallback: crear Parts si no existe NavigationNodes (no debería ocurrir con el nuevo flujo)
 	local color = options.nodeColor or options.color or Color3.fromRGB(0, 255, 0)
 	local size = options.nodeSize or options.size or 0.5
 	local transparency = options.nodeTransparency or options.transparency or 0.3
-	local showLabels = options.showLabels ~= false
 
 	local folder = CreateDebugFolder("DEBUG_Nodes")
 	local count = 0
 
 	for name, node in pairs(graph.nodes) do
-		-- Crear esfera para el nodo
 		local sphere = Instance.new("Part")
 		sphere.Name = name
 		sphere.Shape = Enum.PartType.Ball
@@ -94,13 +132,11 @@ function Visualizer.DrawNodes(graph, options)
 		sphere.Material = Enum.Material.Neon
 		sphere.Parent = folder
 
-		-- Etiqueta
 		if showLabels then
 			local _, billboard = CreateBillboardLabel(sphere, name, {
 				textScaled = true,
 			})
 
-			-- Mostrar metadata si existe
 			if node.metadata and node.metadata.floor ~= 0 then
 				local floorLabel = Instance.new("TextLabel")
 				floorLabel.Size = UDim2.fromScale(1, 0.4)
@@ -630,7 +666,7 @@ end
 -- REPORTE DEL SISTEMA
 -- ==============================================================================
 
-function Visualizer.PrintSystemReport(npcManager, navGraph, spawnedNPCs, baseConfig, debugConfig)
+function Visualizer.PrintSystemReport(npcManager, navGraph, spawnedNPCs, baseConfig)
 	print("\n" .. string.rep("=", 60))
 	print("SISTEMA COMPLETAMENTE INICIALIZADO")
 	print(string.rep("=", 60))
@@ -680,7 +716,9 @@ function Visualizer.PrintSystemReport(npcManager, navGraph, spawnedNPCs, baseCon
 		(#baseConfig.observationAngles * baseConfig.observationTimePerAngle) .. "s por nodo")
 	print("    Navegacion: grafo (acercamiento directo a " .. baseConfig.directApproachDistance .. " studs)")
 	print("    Indicador de estado: " .. (baseConfig.showStateIndicator and "Activado" or "Desactivado"))
-	print("    Nodos en workspace: " .. (debugConfig.keepNodesInWorkspace and "Mantenidos (debug)" or "Destruidos (optimizado)"))
+
+	local nodesKept = workspace:FindFirstChild("NavigationNodes") ~= nil
+	print("    Nodos en workspace: " .. (nodesKept and "Mantenidos (debug)" or "Destruidos (optimizado)"))
 
 	print(string.rep("=", 60) .. "\n")
 end

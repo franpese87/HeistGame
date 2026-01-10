@@ -12,6 +12,9 @@ print("🎮 Iniciando sistema de NPCs...")
 -- 1. CREAR GRAFO DE NAVEGACIÓN
 -- ==============================================================================
 
+-- Mantener las Parts de nodos si estamos en Studio y showNodes está activo
+local keepNodesForDebug = isStudio and DebugConfig.visualizeOnStartup and DebugConfig.showNodes
+
 local navGraph = NPCAISystem.Factory.CreateNavigationGraphFromFolder(
 	workspace.NavigationNodes,
 	{
@@ -21,6 +24,7 @@ local navGraph = NPCAISystem.Factory.CreateNavigationGraphFromFolder(
 		maxConnectionsPerNode = 6,
 		ignoreList = { workspace.NavigationNodes },
 		logging = DebugConfig.logging,
+		keepSourceParts = keepNodesForDebug,
 	}
 )
 
@@ -57,8 +61,7 @@ NPCAISystem.Visualizer.PrintSystemReport(
 	registry,
 	navGraph,
 	spawnedNPCs,
-	NPCBaseConfig,
-	DebugConfig
+	NPCBaseConfig
 )
 
 if isStudio and DebugConfig.visualizeOnStartup then

@@ -68,13 +68,16 @@ function Factory.CreateNavigationGraphFromFolder(nodesFolder, options)
 		end
 	end
 
+	-- Mantener Parts si showNodes está activo (para debug visual)
+	local keepSourceParts = options.keepSourceParts or false
+
 	-- Cargar nodos
 	if hasFloorFolders then
 		-- Nueva estructura de carpetas
-		graph:LoadFromFolderStructure(nodesFolder)
+		graph:LoadFromFolderStructure(nodesFolder, keepSourceParts)
 	else
 		-- Legacy: carpeta plana con Parts
-		graph:LoadFromParts(nodesFolder)
+		graph:LoadFromParts(nodesFolder, keepSourceParts)
 	end
 
 	-- Auto-conectar si se especificó modo

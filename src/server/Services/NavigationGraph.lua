@@ -51,7 +51,7 @@ end
 	      ● Nodos (requieren atributo 'floor' manual)
 ]]
 
-function NavigationGraph:LoadFromFolderStructure(rootFolder)
+function NavigationGraph:LoadFromFolderStructure(rootFolder, keepSourceParts)
 	if not rootFolder then
 		warn("NavigationGraph: Carpeta raíz no proporcionada")
 		return nil
@@ -98,8 +98,10 @@ function NavigationGraph:LoadFromFolderStructure(rootFolder)
 	-- Construir spatial hash 2D después de cargar
 	self:BuildSpatialHash2D()
 
-	-- Limpiar Parts originales
-	rootFolder:Destroy()
+	-- Limpiar Parts originales (solo si no se mantienen para debug)
+	if not keepSourceParts then
+		rootFolder:Destroy()
+	end
 
 	-- Log resumen
 	local floorList = {}
@@ -110,7 +112,8 @@ function NavigationGraph:LoadFromFolderStructure(rootFolder)
 
 	print("NavigationGraph: " .. stats.loaded .. " nodos cargados (" ..
 		table.concat(floorList, ", ") ..
-		(stats.stairs > 0 and (", Stairs:" .. stats.stairs) or "") .. ")")
+		(stats.stairs > 0 and (", Stairs:" .. stats.stairs) or "") ..
+		(keepSourceParts and ", Parts mantenidas" or "") .. ")")
 
 	if stats.discarded > 0 then
 		warn("NavigationGraph: " .. stats.discarded .. " nodos descartados por colisión")
@@ -159,7 +162,7 @@ end
 -- CARGA DE NODOS DESDE PARTS (LEGACY - mantener compatibilidad)
 -- ==============================================================================
 
-function NavigationGraph:LoadFromParts(partsFolder)
+function NavigationGraph:LoadFromParts(partsFolder, keepSourceParts)
 	if not partsFolder then
 		warn("⚠️ Folder de nodos no proporcionado")
 		return
@@ -185,9 +188,11 @@ function NavigationGraph:LoadFromParts(partsFolder)
 			end
 		end
 	end
-	
-	-- Destruir las Parts originales
-	partsFolder:Destroy()
+
+	-- Destruir las Parts originales (solo si no se mantienen para debug)
+	if not keepSourceParts then
+		partsFolder:Destroy()
+	end
 
 	-- Construir spatial hash automáticamente después de cargar nodos
 	self:BuildSpatialHash2D()
