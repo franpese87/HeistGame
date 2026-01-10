@@ -50,6 +50,10 @@ function Controller.new(pawn, navigationGraph, config)
 	self.directApproachDistance = config.directApproachDistance or 8
 	self.nodeTimeout = 4
 
+	-- Path Smoothing
+	self.enablePathSmoothing = config.enablePathSmoothing ~= false -- default true
+	self.agentRadius = config.agentRadius or 1.0
+
 	-- Observación
 	self.observationAngles = config.observationAngles or {-45, 0, 45, 0}
 	self.observationTimePerAngle = config.observationTimePerAngle or 1.0
@@ -385,6 +389,11 @@ function Controller:CalculateGraphPathToPosition(targetPosition)
 	local path = self.graph:GetPathBetweenNodes(startNode, endNode)
 
 	if path and #path > 0 then
+		-- Aplicar path smoothing si está habilitado
+		if self.enablePathSmoothing then
+			path = self.graph:SmoothPath(path, self.agentRadius)
+		end
+
 		self.currentPath = path
 		self.timeStartedMovingToNode = tick()
 

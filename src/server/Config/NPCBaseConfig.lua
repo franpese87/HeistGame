@@ -28,6 +28,12 @@ return {
 	-- Distancia a la que el NPC deja de usar el grafo y se acerca directamente al target para atacar
 	directApproachDistance = 8,
 
+	-- Path Smoothing (Line-of-Sight post-processing)
+	-- Elimina nodos intermedios del path cuando hay línea de visión directa
+	enablePathSmoothing = true,
+	-- Radio del agente para raycasts de LOS (debe coincidir con el ancho del NPC)
+	agentRadius = 1.0,
+
 	-- Indicador visual de estado (debug)
 	showStateIndicator = true,
 	stateIndicatorOffset = 4,

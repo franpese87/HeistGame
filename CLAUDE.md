@@ -187,3 +187,21 @@ NPCManager runs at 30 fps:
   - Beams automatically maintained when `showNodes=true` and `showConnections=true`
   - Beams removed when either debug option is disabled
 - **Removed obsolete NodeGenerator.lua** (Command Bar version replaced by plugin)
+
+### Path Smoothing Implementation (2026-01-10)
+- **Line-of-Sight (LOS) post-processing** for smoother NPC navigation
+  - Eliminates intermediate nodes when direct visibility exists
+  - Uses "string-pulling" approach: finds farthest visible node and skips to it
+- **Multi-raycast validation** for agent width
+  - Center ray + left/right/up rays based on `agentRadius`
+  - Prevents clipping through corners
+- **Floor-aware smoothing**
+  - Only smooths between nodes on the same floor
+  - Preserves all waypoints on stairs for safety
+- **Configuration in NPCBaseConfig**
+  - `enablePathSmoothing`: Toggle feature (default: true)
+  - `agentRadius`: Agent width for LOS checks (default: 1.0)
+- **Files modified**
+  - `NavigationGraph.lua`: Added `SmoothPath()` function
+  - `Controller.lua`: Integrated smoothing after A* path calculation
+  - `NPCBaseConfig.lua`: Added configuration options

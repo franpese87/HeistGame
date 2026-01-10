@@ -806,6 +806,113 @@ function NavigationGraph:GetPathBetweenNodes(startNode, endNode)
 end
 
 -- ==============================================================================
+-- PATH SMOOTHING (Line-of-Sight Post-processing)
+-- ==============================================================================
+
+--[[
+	Suaviza un path eliminando nodos intermedios cuando hay línea de visión directa.
+	Usa "string-pulling" simplificado: desde cada nodo, busca el nodo más lejano
+	visible y salta directamente a él.
+
+	Parámetros:
+	- path: Array de nodos retornado por GetPathBetweenNodes
+	- agentRadius: Radio del agente para el raycast (opcional, default 0.5)
+
+	Retorna:
+	- Path suavizado (nuevo array, no modifica el original)
+	- nil si el path es nil o vacío
+]]
+function NavigationGraph:SmoothPath(path, agentRadius)
+	if not path or #path <= 2 then
+		return path
+	end
+
+	agentRadius = agentRadius or 0.5
+
+	-- Configurar raycast params
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = {workspace:FindFirstChild("NavigationNodes")}
+
+	-- Función helper para verificar línea de visión entre dos posiciones
+	local function hasLineOfSight(fromPos, toPos)
+		local direction = toPos - fromPos
+		local distance = direction.Magnitude
+
+		-- Raycast principal (centro)
+		local result = workspace:Raycast(fromPos, direction, rayParams)
+		if result and (result.Position - fromPos).Magnitude < distance * 0.95 then
+			return false
+		end
+
+		-- Raycasts laterales para considerar el ancho del agente
+		if agentRadius > 0 then
+			local right = direction:Cross(Vector3.new(0, 1, 0)).Unit * agentRadius
+			local up = Vector3.new(0, agentRadius * 0.5, 0)
+
+			-- Raycast derecho
+			local resultRight = workspace:Raycast(fromPos + right, direction, rayParams)
+			if resultRight and (resultRight.Position - (fromPos + right)).Magnitude < distance * 0.95 then
+				return false
+			end
+
+			-- Raycast izquierdo
+			local resultLeft = workspace:Raycast(fromPos - right, direction, rayParams)
+			if resultLeft and (resultLeft.Position - (fromPos - right)).Magnitude < distance * 0.95 then
+				return false
+			end
+
+			-- Raycast superior (para rampas/escaleras)
+			local resultUp = workspace:Raycast(fromPos + up, direction, rayParams)
+			if resultUp and (resultUp.Position - (fromPos + up)).Magnitude < distance * 0.95 then
+				return false
+			end
+		end
+
+		return true
+	end
+
+	local smoothed = {path[1]}
+	local current = 1
+	local originalLength = #path
+
+	while current < #path do
+		local farthestVisible = current + 1
+
+		-- Verificar que estamos en el mismo piso antes de intentar suavizar
+		local currentFloor = path[current].metadata and path[current].metadata.floor
+		local isStair = path[current].metadata and path[current].metadata.isStair
+
+		-- No suavizar si estamos en escaleras (importante mantener todos los waypoints)
+		if not isStair then
+			-- Buscar el nodo más lejano con LOS directo (iterando desde el final)
+			for i = #path, current + 2, -1 do
+				local targetFloor = path[i].metadata and path[i].metadata.floor
+				local targetIsStair = path[i].metadata and path[i].metadata.isStair
+
+				-- Solo considerar nodos en el mismo piso y que no sean escaleras
+				if currentFloor == targetFloor and not targetIsStair then
+					if hasLineOfSight(path[current].position, path[i].position) then
+						farthestVisible = i
+						break
+					end
+				end
+			end
+		end
+
+		table.insert(smoothed, path[farthestVisible])
+		current = farthestVisible
+	end
+
+	local removedNodes = originalLength - #smoothed
+	if removedNodes > 0 then
+		self:Log("astar", "PATH SMOOTHING: " .. originalLength .. " → " .. #smoothed .. " nodos (eliminados " .. removedNodes .. ")")
+	end
+
+	return smoothed
+end
+
+-- ==============================================================================
 -- UTILIDADES
 -- ==============================================================================
 
