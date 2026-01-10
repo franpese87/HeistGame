@@ -62,7 +62,11 @@ function NavigationGraph:LoadFromFolderStructure(rootFolder, keepSourceParts)
 		discarded = 0,
 		floors = {},
 		stairs = 0,
+		connections = 0,
 	}
+
+	-- Lista de conexiones pendientes para procesar después de cargar todos los nodos
+	local pendingConnections = {}
 
 	-- Procesar carpetas Floor_X
 	for _, folder in ipairs(rootFolder:GetChildren()) do
@@ -77,7 +81,7 @@ function NavigationGraph:LoadFromFolderStructure(rootFolder, keepSourceParts)
 					local count = self:LoadNodesFromFolder(folder, {
 						floor = floorNumber,
 						isStair = false,
-					}, rootFolder)
+					}, rootFolder, pendingConnections)
 					stats.loaded = stats.loaded + count
 					stats.floors[floorNumber] = (stats.floors[floorNumber] or 0) + count
 				end
@@ -88,9 +92,23 @@ function NavigationGraph:LoadFromFolderStructure(rootFolder, keepSourceParts)
 				local count = self:LoadNodesFromFolder(folder, {
 					isStair = true,
 					-- floor se lee del atributo manual de cada nodo
-				}, rootFolder)
+				}, rootFolder, pendingConnections)
 				stats.loaded = stats.loaded + count
 				stats.stairs = count
+			end
+		end
+	end
+
+	-- Cargar conexiones desde los atributos
+	for _, conn in ipairs(pendingConnections) do
+		local fromNode = self.nodes[conn.from]
+		local toNode = self.nodes[conn.to]
+
+		if fromNode and toNode then
+			-- Solo añadir si no existe ya (evitar duplicados bidireccionales)
+			if not table.find(fromNode.connections, conn.to) then
+				table.insert(fromNode.connections, conn.to)
+				stats.connections = stats.connections + 1
 			end
 		end
 	end
@@ -113,7 +131,8 @@ function NavigationGraph:LoadFromFolderStructure(rootFolder, keepSourceParts)
 	print("NavigationGraph: " .. stats.loaded .. " nodos cargados (" ..
 		table.concat(floorList, ", ") ..
 		(stats.stairs > 0 and (", Stairs:" .. stats.stairs) or "") ..
-		(keepSourceParts and ", Parts mantenidas" or "") .. ")")
+		(keepSourceParts and ", Parts mantenidas" or "") .. "), " ..
+		stats.connections .. " conexiones")
 
 	if stats.discarded > 0 then
 		warn("NavigationGraph: " .. stats.discarded .. " nodos descartados por colisión")
@@ -123,7 +142,7 @@ function NavigationGraph:LoadFromFolderStructure(rootFolder, keepSourceParts)
 end
 
 -- Función auxiliar: Carga nodos recursivamente desde una carpeta
-function NavigationGraph:LoadNodesFromFolder(folder, inheritedMetadata, rootFolder)
+function NavigationGraph:LoadNodesFromFolder(folder, inheritedMetadata, rootFolder, pendingConnections)
 	local count = 0
 
 	for _, child in ipairs(folder:GetChildren()) do
@@ -147,11 +166,22 @@ function NavigationGraph:LoadNodesFromFolder(folder, inheritedMetadata, rootFold
 
 				self:AddNode(child.Name, child.Position, metadata)
 				count = count + 1
+
+				-- Leer conexiones del atributo (generadas por el plugin)
+				local connectionsStr = child:GetAttribute("connections")
+				if connectionsStr and connectionsStr ~= "" then
+					for _, connName in ipairs(string.split(connectionsStr, ",")) do
+						table.insert(pendingConnections, {
+							from = child.Name,
+							to = connName
+						})
+					end
+				end
 			end
 
 		elseif child:IsA("Folder") then
 			-- Recursión en subcarpetas
-			count = count + self:LoadNodesFromFolder(child, inheritedMetadata, rootFolder)
+			count = count + self:LoadNodesFromFolder(child, inheritedMetadata, rootFolder, pendingConnections)
 		end
 	end
 
