@@ -35,41 +35,6 @@ function NavigationGraph:Log(category, message)
 end
 
 -- ==============================================================================
--- VALIDACIÓN DE POSICIONES
--- ==============================================================================
-
-function NavigationGraph:IsPositionWalkable(position, ignoreFolder)
-	-- Verificar si hay geometría sólida ocupando el espacio del nodo
-	-- Usar GetPartBoundsInRadius para detectar partes en el mismo espacio
-	local overlapParams = OverlapParams.new()
-	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-	overlapParams.FilterDescendantsInstances = {ignoreFolder}
-
-	-- Verificar en un radio de 0.7 studs alrededor del nodo (aproximadamente el radio de un humanoide)
-	local checkRadius = 0.7
-	local partsInRadius = workspace:GetPartBoundsInRadius(position, checkRadius, overlapParams)
-
-	-- Si hay partes sólidas ocupando este espacio, el nodo está dentro de algo
-	for _, part in ipairs(partsInRadius) do
-		if part.CanCollide then
-			-- Verificar que la parte realmente está EN el nodo, no solo cerca
-			-- Comprobar si el centro del nodo está dentro del bounding box de la parte
-			local relativePos = part.CFrame:PointToObjectSpace(position)
-			local halfSize = part.Size / 2
-
-			-- Si el nodo está dentro de los límites de la parte
-			if math.abs(relativePos.X) < halfSize.X and
-			   math.abs(relativePos.Y) < halfSize.Y and
-			   math.abs(relativePos.Z) < halfSize.Z then
-				return false -- Nodo dentro de geometría sólida
-			end
-		end
-	end
-
-	return true -- Nodo válido (no está dentro de geometría)
-end
-
--- ==============================================================================
 -- CARGA DE NODOS DESDE ESTRUCTURA DE CARPETAS
 -- ==============================================================================
 
@@ -160,8 +125,8 @@ function NavigationGraph:LoadNodesFromFolder(folder, inheritedMetadata, rootFold
 
 	for _, child in ipairs(folder:GetChildren()) do
 		if child:IsA("BasePart") then
-			-- Validar posición
-			if self:IsPositionWalkable(child.Position, rootFolder) then
+			-- Solo cargar nodos marcados como walkable por el plugin
+			if child:GetAttribute("walkable") == true then
 				-- Construir metadata
 				local metadata = {
 					floor = inheritedMetadata.floor or child:GetAttribute("floor") or 0,
@@ -199,27 +164,23 @@ function NavigationGraph:LoadFromParts(partsFolder)
 		warn("⚠️ Folder de nodos no proporcionado")
 		return
 	end
-	
+
 	local loadedNodes = {}
 	local discardedNodes = {}
 
 	for _, part in ipairs(partsFolder:GetChildren()) do
 		if part:IsA("BasePart") then
-			-- Validar si el nodo está en zona caminable (sin estar encerrado)
-			local isWalkable = self:IsPositionWalkable(part.Position, partsFolder)
-
-			if isWalkable then
-				-- Leer metadata de atributos si existen (soporta ambas capitalizaciones)
+			-- Solo cargar nodos marcados como walkable por el plugin
+			if part:GetAttribute("walkable") == true then
+				-- Leer metadata de atributos si existen
 				local metadata = {
-					floor = part:GetAttribute("floor") or part:GetAttribute("Floor") or 0,
-					isStair = part:GetAttribute("isStair") or part:GetAttribute("IsStair") or false,
+					floor = part:GetAttribute("floor") or 0,
+					isStair = part:GetAttribute("isStair") or false,
 				}
 
-				-- Guardar en memoria solo si es válido
 				self:AddNode(part.Name, part.Position, metadata)
 				table.insert(loadedNodes, part.Name)
 			else
-				-- Descartar nodo por colisión con geometría
 				table.insert(discardedNodes, part.Name)
 			end
 		end

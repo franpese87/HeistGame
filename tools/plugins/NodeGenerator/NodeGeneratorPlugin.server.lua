@@ -17,13 +17,17 @@ local DEFAULT_SPACING = 2
 local MAX_CONNECTION_DISTANCE = 20
 local MAX_CONNECTIONS_PER_NODE = 6
 
--- Colores por piso
+-- Colores por piso (nodos caminables)
 local FLOOR_COLORS = {
 	[0] = Color3.fromRGB(0, 255, 0),
 	[1] = Color3.fromRGB(0, 150, 255),
 	[2] = Color3.fromRGB(255, 150, 0),
 	[3] = Color3.fromRGB(255, 0, 150),
 }
+
+-- Color para nodos NO caminables (rojo semi-transparente)
+local NON_WALKABLE_COLOR = Color3.fromRGB(255, 50, 50)
+local NON_WALKABLE_TRANSPARENCY = 0.7
 
 -- ============================================================================
 -- LÓGICA DE GENERACIÓN (copiada de NodeGenerator)
@@ -180,37 +184,48 @@ local function generateNodesInZone(zonePart, globalSpacing, nodesRoot, zonesFold
 	-- Lista de elementos a ignorar en el chequeo de colisión
 	local ignoreList = {nodesRoot, zonesFolder}
 
-	local nodeCount = 0
-	local discardedCount = 0
+	local walkableCount = 0
+	local nonWalkableCount = 0
+	local totalNodes = 0
+
 	for ix = 0, numNodesX - 1 do
 		for iz = 0, numNodesZ - 1 do
 			local x = minX + ix * spacingX
 			local z = minZ + iz * spacingZ
 			local nodePosition = Vector3.new(x, baseY, z)
 
-			-- Solo crear nodo si la posición es walkable (con padding de agentRadius)
-			if isPositionWalkable(nodePosition, ignoreList, agentRadius) then
-				nodeCount = nodeCount + 1
+			totalNodes = totalNodes + 1
 
-				local node = Instance.new("Part")
-				node.Name = "Node_" .. floor .. "_" .. (startIndex + nodeCount)
-				node.Size = Vector3.new(1, 1, 1)
-				node.Position = nodePosition
-				node.Anchored = true
-				node.CanCollide = false
-				node.CanQuery = false
+			-- Crear el nodo siempre
+			local node = Instance.new("Part")
+			node.Name = "Node_" .. floor .. "_" .. (startIndex + totalNodes)
+			node.Size = Vector3.new(1, 1, 1)
+			node.Position = nodePosition
+			node.Anchored = true
+			node.CanCollide = false
+			node.CanQuery = false
+			node:SetAttribute("floor", floor)
+			node.Material = Enum.Material.Neon
+
+			-- Verificar si es caminable y aplicar aspecto visual correspondiente
+			local isWalkable = isPositionWalkable(nodePosition, ignoreList, agentRadius)
+			node:SetAttribute("walkable", isWalkable)
+
+			if isWalkable then
 				node.Color = getFloorColor(floor)
-				node.Material = Enum.Material.Neon
 				node.Transparency = 0.3
-				node:SetAttribute("floor", floor)
-				node.Parent = floorFolder
+				walkableCount = walkableCount + 1
 			else
-				discardedCount = discardedCount + 1
+				node.Color = NON_WALKABLE_COLOR
+				node.Transparency = NON_WALKABLE_TRANSPARENCY
+				nonWalkableCount = nonWalkableCount + 1
 			end
+
+			node.Parent = floorFolder
 		end
 	end
 
-	return nodeCount, discardedCount, numNodesX, numNodesZ
+	return walkableCount, nonWalkableCount, numNodesX, numNodesZ
 end
 
 local function clearNodes()
@@ -247,7 +262,7 @@ end
 local function autoConnectNodes(nodesRoot)
 	local connectionCount = 0
 
-	-- Recolectar todos los nodos agrupados por piso
+	-- Recolectar solo nodos CAMINABLES agrupados por piso
 	local nodesByFloor = {}
 	for _, floorFolder in ipairs(nodesRoot:GetChildren()) do
 		if floorFolder:IsA("Folder") then
@@ -255,7 +270,8 @@ local function autoConnectNodes(nodesRoot)
 			if floorNumber then
 				nodesByFloor[floorNumber] = {}
 				for _, node in ipairs(floorFolder:GetChildren()) do
-					if node:IsA("BasePart") then
+					-- Solo incluir nodos marcados como caminables
+					if node:IsA("BasePart") and node:GetAttribute("walkable") == true then
 						table.insert(nodesByFloor[floorNumber], node)
 					end
 				end
@@ -327,28 +343,29 @@ local function generateNodes(spacing, agentRadius)
 	nodesRoot.Name = NODES_FOLDER_NAME
 	nodesRoot.Parent = workspace
 
-	local totalNodes = 0
-	local totalDiscarded = 0
+	local totalWalkable = 0
+	local totalNonWalkable = 0
 	local zoneResults = {}
 
 	for _, zonePart in ipairs(zones) do
-		local nodes, discarded, nx, nz = generateNodesInZone(zonePart, spacing, nodesRoot, zonesFolder, agentRadius)
-		totalNodes = totalNodes + nodes
-		totalDiscarded = totalDiscarded + discarded
+		local walkable, nonWalkable, nx, nz = generateNodesInZone(zonePart, spacing, nodesRoot, zonesFolder, agentRadius)
+		totalWalkable = totalWalkable + walkable
+		totalNonWalkable = totalNonWalkable + nonWalkable
 		table.insert(zoneResults, {
 			name = zonePart.Name,
-			nodes = nodes,
-			discarded = discarded,
+			walkable = walkable,
+			nonWalkable = nonWalkable,
 			grid = nx .. "x" .. nz
 		})
 	end
 
-	-- Auto-conectar nodos después de generarlos todos
+	-- Auto-conectar solo nodos caminables
 	local totalConnections = autoConnectNodes(nodesRoot)
 
 	return {
-		totalNodes = totalNodes,
-		totalDiscarded = totalDiscarded,
+		totalWalkable = totalWalkable,
+		totalNonWalkable = totalNonWalkable,
+		totalNodes = totalWalkable + totalNonWalkable,
 		totalConnections = totalConnections,
 		zonesCount = #zones,
 		zones = zoneResults
@@ -545,17 +562,16 @@ generateBtn.MouseButton1Click:Connect(function()
 	local result, err = generateNodes(spacing, agentRadius)
 
 	if result then
-		local discardedText = ""
-		if result.totalDiscarded > 0 then
-			discardedText = string.format(" (%d descartados)", result.totalDiscarded)
+		local nonWalkableText = ""
+		if result.totalNonWalkable > 0 then
+			nonWalkableText = string.format(" + %d no-walkable", result.totalNonWalkable)
 		end
 		statusLabel.Text = string.format(
-			"%d nodos%s, %d conexiones\n%d zonas, spacing: %.2f",
-			result.totalNodes,
-			discardedText,
+			"%d walkable%s\n%d conexiones, %d zonas",
+			result.totalWalkable,
+			nonWalkableText,
 			result.totalConnections,
-			result.zonesCount,
-			spacing
+			result.zonesCount
 		)
 		statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
 	else
