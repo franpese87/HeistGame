@@ -2,6 +2,7 @@
 *.rbxl
 *.rbxlx
 *.rbxm
+!NodeGeneratorPlugin.rbxm
 
 # Roblox Studio lock files
 *.rbxl.lock
