@@ -10,6 +10,8 @@
 	Usa el Pawn para interactuar con el mundo físico.
 ]]
 
+local TweenService = game:GetService("TweenService")
+
 local VisionSensor = require(script.Parent.Parent.Components.VisionSensor)
 local Combat = require(script.Parent.Parent.Components.Combat)
 local HearingSensor = require(script.Parent.Parent.Components.HearingSensor)
@@ -113,6 +115,7 @@ function Controller.new(pawn, navigationGraph, config)
 
 	-- Alerted (estado temporal)
 	self.alertedStartTime = 0
+	self.alertIndicator = nil
 
 	-- Iniciar
 	if #self.patrolNodes > 0 then
@@ -321,11 +324,55 @@ end
 -- ALERTED (Reacción inicial al detectar target)
 -- ==============================================================================
 
+function Controller:CreateAlertIndicator()
+	local npcInstance = self.pawn:GetInstance()
+	local head = npcInstance:FindFirstChild("Head")
+	if not head then return end
+
+	-- Crear BillboardGui
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "AlertIndicator"
+	billboard.Size = UDim2.fromScale(2, 2)
+	billboard.StudsOffset = Vector3.new(0, 3, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Adornee = head
+	billboard.Parent = head
+
+	-- Crear TextLabel con "!"
+	local label = Instance.new("TextLabel")
+	label.Name = "ExclamationMark"
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = "!"
+	label.TextColor3 = Color3.fromRGB(255, 50, 50)
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.Parent = billboard
+
+	self.alertIndicator = billboard
+
+	-- Animación de fadeout
+	local fadeTime = self.reactionTime * 0.8
+	local fadeTweenInfo = TweenInfo.new(fadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+	local fadeTween = TweenService:Create(label, fadeTweenInfo, {TextTransparency = 1})
+	fadeTween:Play()
+end
+
+function Controller:ClearAlertIndicator()
+	if self.alertIndicator then
+		self.alertIndicator:Destroy()
+		self.alertIndicator = nil
+	end
+end
+
 function Controller:EnterAlerted()
 	self.alertedStartTime = tick()
 	self.pawn:StopMovement()
 	self.pawn:SetAutoRotate(false)
 	self.pawn:PlayAnimation("idle")
+
+	-- Mostrar indicador "!"
+	self:CreateAlertIndicator()
 
 	-- Giro suave hacia el target
 	if self.target then
@@ -372,6 +419,7 @@ end
 function Controller:ExitAlerted()
 	self.pawn:CancelRotationTween()
 	self.pawn:SetAutoRotate(true)
+	self:ClearAlertIndicator()
 end
 
 -- ==============================================================================
@@ -425,7 +473,6 @@ function Controller:ChaseUsingGraph(targetRoot)
 		return
 	end
 
-	local npcPos = self.pawn:GetPosition()
 	local currentTargetNode = self.currentPath[self.currentPathIndex]
 
 	if currentTargetNode and self:HasArrivedAt(currentTargetNode.position) then
