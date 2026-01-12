@@ -393,26 +393,22 @@ end
 function Controller:UpdateAlerted()
 	local elapsed = tick() - self.alertedStartTime
 
-	-- Verificar si aún vemos al target
-	local _, _, events = self.visionSensor:Scan()
-
-	if not events.TargetVisible then
-		-- Perdimos visión durante la reacción → investigar
-		self:ChangeState(AIState.INVESTIGATING)
-		return
-	end
-
 	-- Actualizar lastSeenPosition mientras lo vemos
-	if self.target then
+	local _, _, events = self.visionSensor:Scan()
+	if events.TargetVisible and self.target then
 		local targetRoot = self.target:FindFirstChild("HumanoidRootPart")
 		if targetRoot then
 			self.lastSeenPosition = targetRoot.Position
 		end
 	end
 
-	-- Tiempo de reacción completado → perseguir
+	-- Tiempo de reacción completado → decidir siguiente estado
 	if elapsed >= self.reactionTime then
-		self:ChangeState(AIState.CHASING)
+		if events.TargetVisible then
+			self:ChangeState(AIState.CHASING)
+		else
+			self:ChangeState(AIState.INVESTIGATING)
+		end
 	end
 end
 
