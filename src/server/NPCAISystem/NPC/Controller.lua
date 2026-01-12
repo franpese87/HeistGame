@@ -353,33 +353,32 @@ function Controller:CreateAlertIndicator()
 
 	self.alertIndicator = billboard
 
-	-- Animación: Fadein rápido (0.15s) → Mantener (0.5s) → Fadeout (0.35s)
-	local FADEIN_TIME = 0.15
-	local HOLD_TIME = 0.5
-	local FADEOUT_TIME = 0.35
-
+	-- Fadein rápido al aparecer
 	local fadeinTween = TweenService:Create(label,
-		TweenInfo.new(FADEIN_TIME, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
 		{TextTransparency = 0}
 	)
-
-	local fadeoutTween = TweenService:Create(label,
-		TweenInfo.new(FADEOUT_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-		{TextTransparency = 1}
-	)
-
 	fadeinTween:Play()
-	fadeinTween.Completed:Connect(function()
-		task.delay(HOLD_TIME, function()
-			if self.alertIndicator then
-				fadeoutTween:Play()
-			end
-		end)
-	end)
 end
 
 function Controller:ClearAlertIndicator()
-	if self.alertIndicator then
+	if not self.alertIndicator then return end
+
+	local label = self.alertIndicator:FindFirstChild("ExclamationMark")
+	if label then
+		-- Fadeout rápido antes de destruir
+		local fadeoutTween = TweenService:Create(label,
+			TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{TextTransparency = 1}
+		)
+		fadeoutTween:Play()
+		fadeoutTween.Completed:Connect(function()
+			if self.alertIndicator then
+				self.alertIndicator:Destroy()
+				self.alertIndicator = nil
+			end
+		end)
+	else
 		self.alertIndicator:Destroy()
 		self.alertIndicator = nil
 	end
