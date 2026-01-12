@@ -82,15 +82,13 @@ function VisionSensor.new(npc, config)
 	self.detectionRange = config.detectionRange or 50
 	self.visionHeight = config.visionHeight or 2
 	self.coneAngle = config.observationConeAngle or 90
-	self.minDetectionTime = config.minDetectionTime or 0.3
 	self.loseTargetTime = config.loseTargetTime or 3
 
 	self.raycastParams = RaycastParams.new()
 	self.raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 	self.raycastParams.FilterDescendantsInstances = {npc}
 
-	-- Estado de detección
-	self.detectionAccumulator = nil
+	-- Estado de detección (simplificado - sin acumulador)
 	self.lostTargetTime = nil
 	self.lastSeenTime = 0
 	self.confirmedTarget = nil
@@ -229,60 +227,38 @@ function VisionSensor:CheckLineOfSight(targetRootPart)
 end
 
 -- ==============================================================================
--- DETECTION LOGIC (BUFFER / MEMORY)
+-- DETECTION LOGIC (INSTANT DETECTION)
 -- ==============================================================================
 
 function VisionSensor:ProcessDetectionLogic(visibleTarget, currentTime)
-	local COYOTE_TIME = 0.5
-	local DELTA_TIME = 0.03
-
-	local timeSinceLastSight = currentTime - self.lastSeenTime
-	local inCoyoteTime = timeSinceLastSight < COYOTE_TIME
-	local isCurrentlyVisible = visibleTarget ~= nil
-
 	local events = {
-		TargetConfirmed = false,
-		TargetLost = false,
-		TargetSpotting = false
+		TargetSpotted = false,   -- Primera vez que ve este target (dispara ALERTED)
+		TargetVisible = false,   -- Target actualmente visible
+		TargetLost = false,      -- Target perdido definitivamente
 	}
 
-	if isCurrentlyVisible then
-		-- Target visible: acumular tiempo de detección
-		self.detectionAccumulator = (self.detectionAccumulator or 0) + DELTA_TIME
+	if visibleTarget then
+		events.TargetVisible = true
+
+		-- Primera vez que vemos este target específico
+		if self.confirmedTarget ~= visibleTarget then
+			self.confirmedTarget = visibleTarget
+			events.TargetSpotted = true
+		end
+
 		self.lostTargetTime = nil
-
-		if self.detectionAccumulator >= self.minDetectionTime then
-			if self.confirmedTarget ~= visibleTarget then
-				self.confirmedTarget = visibleTarget
-				events.TargetConfirmed = true
-			end
-			events.TargetSpotting = true
-		end
-
-	elseif inCoyoteTime and self.detectionAccumulator and self.detectionAccumulator > 0 then
-		-- Coyote time: mantener estado
-		events.TargetSpotting = true
-
 	else
-		-- No visible: decrementar acumulador
-		if self.detectionAccumulator and self.detectionAccumulator > 0 then
-			self.detectionAccumulator = self.detectionAccumulator - (DELTA_TIME * 2)
-			if self.detectionAccumulator <= 0 then
-				self.detectionAccumulator = nil
-			end
-		end
-
-		-- Lógica de olvidar target
+		-- Target no visible: lógica de pérdida
 		if self.confirmedTarget then
 			if not self.lostTargetTime then
 				self.lostTargetTime = currentTime
 			end
 
+			-- Después de loseTargetTime, olvidar completamente al target
 			if currentTime - self.lostTargetTime >= self.loseTargetTime then
 				events.TargetLost = true
 				self.confirmedTarget = nil
 				self.lostTargetTime = nil
-				self.detectionAccumulator = nil
 			end
 		end
 	end

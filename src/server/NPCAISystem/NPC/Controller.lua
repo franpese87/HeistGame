@@ -19,6 +19,7 @@ local Visualizer = require(script.Parent.Parent.Debug.Visualizer)
 local AIState = {
 	PATROLLING = "Patrolling",
 	OBSERVING = "Observing",
+	ALERTED = "Alerted",
 	CHASING = "Chasing",
 	ATTACKING = "Attacking",
 	INVESTIGATING = "Investigating",
@@ -58,6 +59,10 @@ function Controller.new(pawn, navigationGraph, config)
 	self.observationAngles = config.observationAngles or {-45, 0, 45, 0}
 	self.observationTimePerAngle = config.observationTimePerAngle or 1.0
 	self.rotationTweenInfo = TweenInfo.new(self.observationTimePerAngle * 0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+
+	-- Reacción (tiempo en estado ALERTED antes de CHASING)
+	self.reactionTime = config.reactionTime or 0.8
+	self.alertedTweenInfo = TweenInfo.new(self.reactionTime * 0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
 
 	-- Investigación (duración = tiempo total de observación en un nodo de patrulla)
 	self.investigationDuration = #self.observationAngles * self.observationTimePerAngle
@@ -105,6 +110,9 @@ function Controller.new(pawn, navigationGraph, config)
 	self.originalCFrame = nil
 	self.currentObservationIndex = 1
 	self.observationStartTime = 0
+
+	-- Alerted (estado temporal)
+	self.alertedStartTime = 0
 
 	-- Iniciar
 	if #self.patrolNodes > 0 then
@@ -168,6 +176,8 @@ function Controller:Update(_deltaTime)
 		self:UpdatePatrolling()
 	elseif self.currentState == AIState.OBSERVING then
 		self:UpdateObserving()
+	elseif self.currentState == AIState.ALERTED then
+		self:UpdateAlerted()
 	elseif self.currentState == AIState.CHASING then
 		self:UpdateChasing()
 	elseif self.currentState == AIState.ATTACKING then
@@ -195,11 +205,14 @@ function Controller:UpdateSenses()
 		self.lastSeenPosition = lastPos
 	end
 
-	if events.TargetConfirmed then
-		self:Log("detection", "TARGET CONFIRMADO: " .. currentTarget.Name)
+	-- Detección instantánea → ALERTED (solo desde estados no-combate)
+	if events.TargetSpotted then
+		self:Log("detection", "TARGET DETECTADO: " .. currentTarget.Name)
 
-		if self.currentState ~= AIState.CHASING and self.currentState ~= AIState.ATTACKING then
-			self:ChangeState(AIState.CHASING)
+		if self.currentState ~= AIState.CHASING
+		   and self.currentState ~= AIState.ATTACKING
+		   and self.currentState ~= AIState.ALERTED then
+			self:ChangeState(AIState.ALERTED)
 		end
 	end
 
@@ -302,6 +315,63 @@ function Controller:RotateToObservationAngle(angle)
 	if not self.originalCFrame then return end
 	local targetCFrame = self.originalCFrame * CFrame.Angles(0, math.rad(angle), 0)
 	self.pawn:RotateWithTween(targetCFrame, self.rotationTweenInfo)
+end
+
+-- ==============================================================================
+-- ALERTED (Reacción inicial al detectar target)
+-- ==============================================================================
+
+function Controller:EnterAlerted()
+	self.alertedStartTime = tick()
+	self.pawn:StopMovement()
+	self.pawn:SetAutoRotate(false)
+	self.pawn:PlayAnimation("idle")
+
+	-- Giro suave hacia el target
+	if self.target then
+		local targetRoot = self.target:FindFirstChild("HumanoidRootPart")
+		if targetRoot then
+			local npcPos = self.pawn:GetPosition()
+			local targetPos = targetRoot.Position
+			local direction = (targetPos - npcPos) * Vector3.new(1, 0, 1)
+
+			if direction.Magnitude > 0.1 then
+				local targetCFrame = CFrame.lookAt(npcPos, npcPos + direction.Unit)
+				self.pawn:RotateWithTween(targetCFrame, self.alertedTweenInfo)
+			end
+		end
+	end
+end
+
+function Controller:UpdateAlerted()
+	local elapsed = tick() - self.alertedStartTime
+
+	-- Verificar si aún vemos al target
+	local _, _, events = self.visionSensor:Scan()
+
+	if not events.TargetVisible then
+		-- Perdimos visión durante la reacción → investigar
+		self:ChangeState(AIState.INVESTIGATING)
+		return
+	end
+
+	-- Actualizar lastSeenPosition mientras lo vemos
+	if self.target then
+		local targetRoot = self.target:FindFirstChild("HumanoidRootPart")
+		if targetRoot then
+			self.lastSeenPosition = targetRoot.Position
+		end
+	end
+
+	-- Tiempo de reacción completado → perseguir
+	if elapsed >= self.reactionTime then
+		self:ChangeState(AIState.CHASING)
+	end
+end
+
+function Controller:ExitAlerted()
+	self.pawn:CancelRotationTween()
+	self.pawn:SetAutoRotate(true)
 end
 
 -- ==============================================================================
@@ -585,6 +655,8 @@ function Controller:ChangeState(newState)
 	-- EXIT
 	if self.currentState == AIState.OBSERVING then
 		self:ExitObserving()
+	elseif self.currentState == AIState.ALERTED then
+		self:ExitAlerted()
 	elseif self.currentState == AIState.INVESTIGATING then
 		self:ExitInvestigating()
 	elseif self.currentState == AIState.RETURNING then
@@ -605,6 +677,8 @@ function Controller:ChangeState(newState)
 		end
 	elseif newState == AIState.OBSERVING then
 		self:EnterObserving()
+	elseif newState == AIState.ALERTED then
+		self:EnterAlerted()
 	elseif newState == AIState.INVESTIGATING then
 		self:EnterInvestigating()
 	elseif newState == AIState.CHASING then

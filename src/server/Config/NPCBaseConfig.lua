@@ -6,7 +6,7 @@ return {
 	detectionRange = 20,
 	attackRange = 3,
 	loseTargetTime = 1,
-	minDetectionTime = 0.3,
+	reactionTime = 0.8,  -- Tiempo en estado ALERTED antes de CHASING
 	attackCooldown = 1,
 	attackDamage = 10,
 	visionHeight = 2,
