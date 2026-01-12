@@ -330,11 +330,11 @@ function Controller:CreateAlertIndicator()
 	local head = npcInstance:FindFirstChild("Head")
 	if not head then return end
 
-	-- Crear BillboardGui
+	-- Crear BillboardGui (empieza en la cabeza)
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "AlertIndicator"
 	billboard.Size = UDim2.fromScale(2, 2)
-	billboard.StudsOffset = Vector3.new(0, 3, 0)
+	billboard.StudsOffset = Vector3.new(0, 0, 0)  -- Empieza en la cabeza
 	billboard.AlwaysOnTop = true
 	billboard.Adornee = head
 	billboard.Parent = head
@@ -348,16 +348,22 @@ function Controller:CreateAlertIndicator()
 	label.TextColor3 = Color3.fromRGB(255, 50, 50)
 	label.TextScaled = true
 	label.Font = Enum.Font.GothamBold
-	label.TextTransparency = 1  -- Empieza invisible para fadein
+	label.TextTransparency = 1  -- Empieza invisible
 	label.Parent = billboard
 
 	self.alertIndicator = billboard
 
-	-- Fadein rápido al aparecer
-	local fadeinTween = TweenService:Create(label,
-		TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+	-- Animación: sube desde la cabeza + fadein
+	local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+
+	local positionTween = TweenService:Create(billboard, tweenInfo,
+		{StudsOffset = Vector3.new(0, 3, 0)}
+	)
+	local fadeinTween = TweenService:Create(label, tweenInfo,
 		{TextTransparency = 0}
 	)
+
+	positionTween:Play()
 	fadeinTween:Play()
 end
 
@@ -366,12 +372,19 @@ function Controller:ClearAlertIndicator()
 
 	local label = self.alertIndicator:FindFirstChild("ExclamationMark")
 	if label then
-		-- Fadeout rápido antes de destruir
-		local fadeoutTween = TweenService:Create(label,
-			TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		-- Fadeout + sube un poco más antes de destruir
+		local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+
+		local positionTween = TweenService:Create(self.alertIndicator, tweenInfo,
+			{StudsOffset = Vector3.new(0, 4, 0)}
+		)
+		local fadeoutTween = TweenService:Create(label, tweenInfo,
 			{TextTransparency = 1}
 		)
+
+		positionTween:Play()
 		fadeoutTween:Play()
+
 		fadeoutTween.Completed:Connect(function()
 			if self.alertIndicator then
 				self.alertIndicator:Destroy()
