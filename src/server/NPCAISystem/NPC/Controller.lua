@@ -357,7 +357,7 @@ function Controller:CreateAlertIndicator()
 	local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 
 	local positionTween = TweenService:Create(billboard, tweenInfo,
-		{StudsOffset = Vector3.new(0, 3, 0)}
+		{StudsOffset = Vector3.new(0, 2, 0)}
 	)
 	local fadeinTween = TweenService:Create(label, tweenInfo,
 		{TextTransparency = 0}
@@ -376,7 +376,7 @@ function Controller:ClearAlertIndicator()
 		local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 
 		local positionTween = TweenService:Create(self.alertIndicator, tweenInfo,
-			{StudsOffset = Vector3.new(0, 4, 0)}
+			{StudsOffset = Vector3.new(0, 2.5, 0)}
 		)
 		local fadeoutTween = TweenService:Create(label, tweenInfo,
 			{TextTransparency = 1}
