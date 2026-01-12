@@ -660,13 +660,10 @@ function Visualizer.PrintSystemReport(npcManager, navGraph, spawnedNPCs, baseCon
 
 	-- Configuración
 	print("\nConfiguracion:")
-	print("    Deteccion: " .. baseConfig.minDetectionTime .. "s (" ..
-		math.ceil(baseConfig.minDetectionTime * 30) .. " frames @ 30 FPS)")
+	print("    Deteccion: " .. baseConfig.minDetectionTime .. "s (" .. math.ceil(baseConfig.minDetectionTime * 30) .. " frames @ 30 FPS)")
 	print("    Rango de deteccion: " .. baseConfig.detectionRange .. " studs")
 	print("    Cono de vision: " .. baseConfig.observationConeAngle .. " grados")
-	print("    Sistema de observacion: " .. #baseConfig.observationAngles ..
-		" angulos x " .. baseConfig.observationTimePerAngle .. "s = " ..
-		(#baseConfig.observationAngles * baseConfig.observationTimePerAngle) .. "s por nodo")
+	print("    Sistema de observacion: " .. #baseConfig.observationAngles .. " angulos x " .. baseConfig.observationTimePerAngle .. "s = " .. (#baseConfig.observationAngles * baseConfig.observationTimePerAngle) .. "s por nodo")
 	print("    Navegacion: grafo (acercamiento directo a " .. baseConfig.directApproachDistance .. " studs)")
 	print("    Indicador de estado: " .. (baseConfig.showStateIndicator and "Activado" or "Desactivado"))
 
