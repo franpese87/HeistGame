@@ -64,7 +64,8 @@ function Controller.new(pawn, navigationGraph, config)
 
 	-- Reacción (tiempo en estado ALERTED antes de CHASING)
 	self.reactionTime = config.reactionTime or 0.8
-	self.alertedTweenInfo = TweenInfo.new(self.reactionTime * 0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+	self.alertedRotationTime = 0.4  -- Rotación rápida fija (independiente de reactionTime)
+	self.alertedTweenInfo = TweenInfo.new(self.alertedRotationTime, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 
 	-- Investigación (duración = tiempo total de observación en un nodo de patrulla)
 	self.investigationDuration = #self.observationAngles * self.observationTimePerAngle
@@ -347,15 +348,34 @@ function Controller:CreateAlertIndicator()
 	label.TextColor3 = Color3.fromRGB(255, 50, 50)
 	label.TextScaled = true
 	label.Font = Enum.Font.GothamBold
+	label.TextTransparency = 1  -- Empieza invisible para fadein
 	label.Parent = billboard
 
 	self.alertIndicator = billboard
 
-	-- Animación de fadeout
-	local fadeTime = self.reactionTime * 0.8
-	local fadeTweenInfo = TweenInfo.new(fadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-	local fadeTween = TweenService:Create(label, fadeTweenInfo, {TextTransparency = 1})
-	fadeTween:Play()
+	-- Animación: Fadein rápido (0.15s) → Mantener (0.5s) → Fadeout (0.35s)
+	local FADEIN_TIME = 0.15
+	local HOLD_TIME = 0.5
+	local FADEOUT_TIME = 0.35
+
+	local fadeinTween = TweenService:Create(label,
+		TweenInfo.new(FADEIN_TIME, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		{TextTransparency = 0}
+	)
+
+	local fadeoutTween = TweenService:Create(label,
+		TweenInfo.new(FADEOUT_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{TextTransparency = 1}
+	)
+
+	fadeinTween:Play()
+	fadeinTween.Completed:Connect(function()
+		task.delay(HOLD_TIME, function()
+			if self.alertIndicator then
+				fadeoutTween:Play()
+			end
+		end)
+	end)
 end
 
 function Controller:ClearAlertIndicator()
