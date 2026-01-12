@@ -102,7 +102,7 @@ function VisionSensor.new(npc, config)
 		rangeCircle = nil,
 		coneBoundaryLeft = nil,
 		coneBoundaryRight = nil,
-		losRaycasts = {},
+		losRaycast = nil,
 	}
 
 	return self
@@ -116,53 +116,56 @@ end
 -- SCAN - PIPELINE DE DETECCIÓN
 -- ==============================================================================
 --[[
-	Pipeline de detección (de menos a más costoso):
-	- FASE 1: Distance Check (magnitude)
-	- FASE 2: Vision Cone Check (dot product)
-	- FASE 3: Line of Sight Check (raycast)
+	Pipeline de detección optimizado (solo procesa el jugador más cercano):
+	- FASE 1: Distance Check - Encontrar jugador más cercano en rango
+	- FASE 2: Vision Cone Check (dot product) - Solo para el más cercano
+	- FASE 3: Line of Sight Check (raycast) - Solo para el más cercano
 ]]
 
 function VisionSensor:Scan()
 	local currentTime = tick()
-	local nearestTarget = nil
-	local nearestDistance = math.huge
 
-	local playerInRange = false
-	local playerInCone = false
-	local losResults = {}
+	-- FASE 1: Encontrar el jugador más cercano dentro del rango
+	local closestCharacter = nil
+	local closestDistance = math.huge
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		local character = player.Character
 		if not character then continue end
 		if not self:IsValidTarget(character) then continue end
 
-		local targetRootPart = character.HumanoidRootPart
-
-		-- FASE 1: Distance Check
-		local distance = (self.rootPart.Position - targetRootPart.Position).Magnitude
-		if distance > self.detectionRange then continue end
-		playerInRange = true
-
-		-- FASE 2: Vision Cone Check
-		if not self:IsInsideVisionCone(targetRootPart) then continue end
-		playerInCone = true
-
-		-- FASE 3: Line of Sight Check
-		local hasLOS, losData = self:CheckLineOfSight(targetRootPart)
-		table.insert(losResults, losData)
-
-		if not hasLOS then continue end
-
-		-- Target válido - seleccionar el más cercano
-		if distance < nearestDistance then
-			nearestDistance = distance
-			nearestTarget = character
+		local distance = (self.rootPart.Position - character.HumanoidRootPart.Position).Magnitude
+		if distance <= self.detectionRange and distance < closestDistance then
+			closestDistance = distance
+			closestCharacter = character
 		end
 	end
 
-	if nearestTarget then
+	local playerInRange = closestCharacter ~= nil
+	local playerInCone = false
+	local losData = nil
+	local detectedTarget = nil
+
+	if closestCharacter then
+		local targetRootPart = closestCharacter.HumanoidRootPart
+
+		-- FASE 2: Vision Cone Check (solo para el más cercano)
+		if self:IsInsideVisionCone(targetRootPart) then
+			playerInCone = true
+
+			-- FASE 3: Line of Sight Check (solo si pasó Fase 2)
+			local hasLOS
+			hasLOS, losData = self:CheckLineOfSight(targetRootPart)
+
+			if hasLOS then
+				detectedTarget = closestCharacter
+			end
+		end
+	end
+
+	if detectedTarget then
 		self.lastSeenTime = currentTime
-		self.lastSeenPosition = nearestTarget.HumanoidRootPart.Position
+		self.lastSeenPosition = detectedTarget.HumanoidRootPart.Position
 	end
 
 	-- Debug visual
@@ -170,8 +173,8 @@ function VisionSensor:Scan()
 		self:UpdateRangeCircle(playerInRange)
 		if playerInRange then
 			self:UpdateConeBoundaries(playerInCone)
-			if playerInCone then
-				self:UpdateLineOfSight(losResults)
+			if playerInCone and losData then
+				self:UpdateLineOfSight(losData)
 			else
 				self:ClearLineOfSight()
 			end
@@ -181,7 +184,7 @@ function VisionSensor:Scan()
 		end
 	end
 
-	return self:ProcessDetectionLogic(nearestTarget, currentTime)
+	return self:ProcessDetectionLogic(detectedTarget, currentTime)
 end
 
 -- ==============================================================================
@@ -369,39 +372,26 @@ function VisionSensor:ClearConeBoundaries()
 	end
 end
 
--- Fase 3: Líneas de raycast (blanco = no detectado/bloqueado, rojo = detectado)
-function VisionSensor:UpdateLineOfSight(losResults)
-	local existingLines = self.debugInstances.losRaycasts
-	local requiredCount = #losResults
-
-	-- Crear líneas adicionales si es necesario
-	for i = #existingLines + 1, requiredCount do
-		local line = createDebugPart("LOSRaycast_" .. i, Enum.PartType.Cylinder)
+-- Fase 3: Línea de raycast (blanco = no detectado/bloqueado, rojo = detectado)
+function VisionSensor:UpdateLineOfSight(losData)
+	if not self.debugInstances.losRaycast then
+		local line = createDebugPart("LOSRaycast", Enum.PartType.Cylinder)
 		line.Transparency = 0.3
-		existingLines[i] = line
+		self.debugInstances.losRaycast = line
 	end
 
-	-- Destruir líneas sobrantes
-	for i = requiredCount + 1, #existingLines do
-		existingLines[i]:Destroy()
-		existingLines[i] = nil
-	end
+	local line = self.debugInstances.losRaycast
+	local lineCFrame, lineLength = createLineCFrame(losData.origin, losData.hitPoint)
 
-	-- Actualizar cada línea con los datos del raycast
-	for i, losData in ipairs(losResults) do
-		local line = existingLines[i]
-		local lineCFrame, lineLength = createLineCFrame(losData.origin, losData.hitPoint)
-
-		line.Size = Vector3.new(lineLength, 0.1, 0.1)
-		line.CFrame = lineCFrame
-		line.Color = losData.hasLOS and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(255, 255, 255)
-	end
+	line.Size = Vector3.new(lineLength, 0.1, 0.1)
+	line.CFrame = lineCFrame
+	line.Color = losData.hasLOS and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(255, 255, 255)
 end
 
 function VisionSensor:ClearLineOfSight()
-	for i, line in ipairs(self.debugInstances.losRaycasts) do
-		line:Destroy()
-		self.debugInstances.losRaycasts[i] = nil
+	if self.debugInstances.losRaycast then
+		self.debugInstances.losRaycast:Destroy()
+		self.debugInstances.losRaycast = nil
 	end
 end
 
