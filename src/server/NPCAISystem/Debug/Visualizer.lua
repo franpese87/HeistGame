@@ -70,41 +70,10 @@ end
 -- ==============================================================================
 
 function Visualizer.DrawNodes(graph, options)
-	options = options or {}
-
-	-- Si NavigationNodes existe, las Parts ya están en workspace (generadas por el plugin)
-	-- No necesitamos hacer nada, solo retornar la carpeta existente
+	-- Los nodos son generados por el plugin NodeGenerator
+	-- Esta función solo retorna la carpeta existente
 	local existingFolder = workspace:FindFirstChild("NavigationNodes")
-	if existingFolder then
-		return existingFolder
-	end
-
-	-- Fallback: crear Parts si no existe NavigationNodes (no debería ocurrir con el nuevo flujo)
-	local color = options.nodeColor or options.color or Color3.fromRGB(0, 255, 0)
-	local size = options.nodeSize or options.size or 0.5
-	local transparency = options.nodeTransparency or options.transparency or 0.3
-
-	local folder = CreateDebugFolder("DEBUG_Nodes")
-	local count = 0
-
-	for name, node in pairs(graph.nodes) do
-		local sphere = Instance.new("Part")
-		sphere.Name = name
-		sphere.Shape = Enum.PartType.Ball
-		sphere.Size = Vector3.new(size, size, size)
-		sphere.Position = node.position
-		sphere.Anchored = true
-		sphere.CanCollide = false
-		sphere.CanQuery = false
-		sphere.Color = color
-		sphere.Transparency = transparency
-		sphere.Material = Enum.Material.Neon
-		sphere.Parent = folder
-
-		count = count + 1
-	end
-
-	return folder
+	return existingFolder
 end
 
 -- ==============================================================================
@@ -371,14 +340,10 @@ function Visualizer.DisableNPCDebug(ai)
 end
 
 -- ==============================================================================
--- VISUALIZACIÓN DE PATHS DE NPCs
+-- VISUALIZACIÓN DE PATHS DE NPCs (Nodos encendidos mientras están en path)
 -- ==============================================================================
 
--- Atributos usados en las Parts para tracking:
--- _pathOriginalColor: Color3 - color original antes de ser modificado
--- _pathRefCount: number - cuántos NPCs están usando este nodo
-
--- Cache de nodos modificados por NPC (lista de Parts)
+-- Cache de nodos encendidos por NPC: { [npcName] = { Part, Part, ... } }
 local activePathParts = {}
 
 -- Busca la Part de un nodo en NavigationNodes (búsqueda recursiva)
@@ -403,72 +368,95 @@ local function findNodePart(nodeName)
 	return searchInFolder(navNodes)
 end
 
--- Libera los nodos de un NPC y restaura colores si ya no hay referencias
-local function releasePathParts(parts)
-	if not parts then return end
+-- Enciende un nodo (Material.Neon + opaco)
+local function turnOnNode(nodePart)
+	if not nodePart or not nodePart.Parent then return end
 
-	for _, part in ipairs(parts) do
-		if part and part.Parent then
-			local refCount = (part:GetAttribute("_pathRefCount") or 1) - 1
-			if refCount <= 0 then
-				-- Restaurar color original
-				local originalColor = part:GetAttribute("_pathOriginalColor")
-				if originalColor then
-					part.Color = originalColor
-				end
-				part:SetAttribute("_pathOriginalColor", nil)
-				part:SetAttribute("_pathRefCount", nil)
-			else
-				part:SetAttribute("_pathRefCount", refCount)
-			end
+	-- Guardar estado original solo si es la primera vez que se enciende
+	if not nodePart:GetAttribute("_pathOriginalMaterial") then
+		nodePart:SetAttribute("_pathOriginalMaterial", nodePart.Material.Name)
+		nodePart:SetAttribute("_pathOriginalTransparency", nodePart.Transparency)
+		nodePart:SetAttribute("_pathRefCount", 0)
+	end
+
+	-- Incrementar ref count
+	local refCount = nodePart:GetAttribute("_pathRefCount") + 1
+	nodePart:SetAttribute("_pathRefCount", refCount)
+
+	-- Encender (Material.Neon + semi-transparente para emisión natural)
+	nodePart.Material = Enum.Material.Neon
+	nodePart.Transparency = 0.4
+end
+
+-- Apaga un nodo (restaura estado original si no hay más referencias)
+local function turnOffNode(nodePart)
+	if not nodePart or not nodePart.Parent then return end
+
+	local refCount = nodePart:GetAttribute("_pathRefCount")
+	if not refCount then return end
+
+	refCount = refCount - 1
+	nodePart:SetAttribute("_pathRefCount", refCount)
+
+	-- Solo restaurar si no hay más NPCs usando este nodo
+	if refCount <= 0 then
+		local originalMaterial = nodePart:GetAttribute("_pathOriginalMaterial")
+		local originalTransparency = nodePart:GetAttribute("_pathOriginalTransparency")
+
+		if originalMaterial then
+			nodePart.Material = Enum.Material[originalMaterial]
 		end
+		if originalTransparency then
+			nodePart.Transparency = originalTransparency
+		end
+
+		-- Limpiar atributos
+		nodePart:SetAttribute("_pathOriginalMaterial", nil)
+		nodePart:SetAttribute("_pathOriginalTransparency", nil)
+		nodePart:SetAttribute("_pathRefCount", nil)
 	end
 end
 
-function Visualizer.DrawNPCPath(npcName, path, startIndex, options)
-	if not path or #path == 0 then return end
+-- Apaga todos los nodos de un NPC
+local function releasePathParts(npcName)
+	local parts = activePathParts[npcName]
+	if not parts then return end
 
-	-- Requiere NavigationNodes en workspace para visualizar
+	for _, part in ipairs(parts) do
+		turnOffNode(part)
+	end
+
+	activePathParts[npcName] = nil
+end
+
+-- Enciende los nodos del path actual del NPC
+function Visualizer.DrawNPCPath(npcName, path, startIndex, _options)
+	if not path or #path == 0 then return end
 	if not workspace:FindFirstChild("NavigationNodes") then return end
 
-	options = options or {}
-	local color = options.color or Color3.fromRGB(255, 165, 0)
+	-- Apagar nodos del path anterior
+	releasePathParts(npcName)
 
-	-- Liberar nodos del path anterior
-	releasePathParts(activePathParts[npcName])
-
-	-- Lista de Parts modificadas en este path
-	local modifiedParts = {}
-
-	-- Cambiar el color de los nodos del path
+	-- Encender nodos del nuevo path
+	local parts = {}
 	local actualStartIndex = startIndex or 1
+
 	for i = actualStartIndex, #path do
 		local node = path[i]
 		local nodePart = findNodePart(node.name)
 
 		if nodePart then
-			-- Guardar color original solo si es la primera referencia
-			if not nodePart:GetAttribute("_pathOriginalColor") then
-				nodePart:SetAttribute("_pathOriginalColor", nodePart.Color)
-				nodePart:SetAttribute("_pathRefCount", 0)
-			end
-			nodePart:SetAttribute("_pathRefCount", nodePart:GetAttribute("_pathRefCount") + 1)
-
-			-- Cambiar color
-			nodePart.Color = color
-			table.insert(modifiedParts, nodePart)
+			turnOnNode(nodePart)
+			table.insert(parts, nodePart)
 		end
 	end
 
-	-- Guardar referencia
-	activePathParts[npcName] = modifiedParts
-
-	return modifiedParts
+	activePathParts[npcName] = parts
 end
 
+-- Apaga los nodos del path de un NPC
 function Visualizer.ClearNPCPath(npcName)
-	releasePathParts(activePathParts[npcName])
-	activePathParts[npcName] = nil
+	releasePathParts(npcName)
 end
 
 -- ==============================================================================

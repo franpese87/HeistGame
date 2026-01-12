@@ -205,7 +205,7 @@ local function generateNodesInZone(zonePart, globalSpacing, nodesRoot, zonesFold
 			node.CanCollide = false
 			node.CanQuery = false
 			node:SetAttribute("floor", floor)
-			node.Material = Enum.Material.Neon
+			node.Material = Enum.Material.SmoothPlastic
 
 			-- Verificar si es caminable y aplicar aspecto visual correspondiente
 			local isWalkable = isPositionWalkable(nodePosition, ignoreList, agentRadius)
@@ -213,7 +213,7 @@ local function generateNodesInZone(zonePart, globalSpacing, nodesRoot, zonesFold
 
 			if isWalkable then
 				node.Color = getFloorColor(floor)
-				node.Transparency = 0.3
+				node.Transparency = 0.85
 				walkableCount = walkableCount + 1
 			else
 				node.Color = NON_WALKABLE_COLOR
