@@ -30,11 +30,18 @@ return {
 	-- DEBUG VISUAL (SENSORS Y PATHS)
 	-- ==============================================================================
 	visuals = {
-		showVisionRays = true,     -- Muestra las líneas de visión (Verde/Rojo)
-		showNoiseSpheres = true,   -- Muestra esferas donde se generan ruidos
-		showNPCPaths = true,       -- Muestra la ruta actual del NPC cambiando color de nodos
-		showLastSeenPosition = true, -- Muestra esfera en la última posición detectada del target
-		showDebugLabels = true,    -- Muestra etiquetas de texto en lastSeenPosition
+		-- Sistema de Visión (VisionSensor) - Pipeline modular de 3 fases
+		-- Una única flag activa todo el sistema. Cada fase se muestra condicionalmente:
+		-- Fase 1 (círculo): siempre visible si debug activo
+		-- Fase 2 (cono): visible solo si Fase 1 detectó jugador en rango
+		-- Fase 3 (raycast): visible solo si Fase 2 detectó jugador en el cono
+		showVisionDebug = true,
+
+		-- Otros sistemas
+		showNoiseSpheres = true,        -- Muestra esferas donde se generan ruidos
+		showNPCPaths = true,            -- Muestra la ruta actual del NPC cambiando color de nodos
+		showLastSeenPosition = true,    -- Muestra esfera en la última posición detectada del target
+		showDebugLabels = true,         -- Muestra etiquetas de texto en lastSeenPosition
 	},
 
 	-- ==============================================================================

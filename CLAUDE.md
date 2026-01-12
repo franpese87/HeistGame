@@ -205,3 +205,33 @@ NPCManager runs at 30 fps:
   - `NavigationGraph.lua`: Added `SmoothPath()` function
   - `Controller.lua`: Integrated smoothing after A* path calculation
   - `NPCBaseConfig.lua`: Added configuration options
+
+### VisionSensor Refactoring (2026-01-12)
+- **Simplified target detection to Players only**
+  - Removed NPC vs NPC detection (CollectionService "Entity" tag system)
+  - Eliminated team/faction logic from `IsValidTarget()`
+  - Game design: Players vs NPCs only (no inter-NPC combat)
+  - Removed `Registry:GetNPCsByTeam()` unused function
+- **Modular detection pipeline** (optimized for performance)
+  - **Phase 1: Distance Check** - Magnitude calculation (most efficient)
+  - **Phase 2: Vision Cone Check** - Dot product angle validation (moderate cost)
+  - **Phase 3: Line of Sight Check** - Raycast occlusion (most expensive)
+  - Early exit at each phase if check fails (avoids unnecessary computations)
+- **Comprehensive debug visual system**
+  - `showDetectionRadius`: Sphere showing detection range (Phase 1)
+  - `showVisionCone`: WedgePart showing NPC's field of view (Phase 2)
+  - `showLineOfSight`: Raycasts showing occlusion checks (Phase 3)
+  - `showAllChecks`: Visualize failed checks (red/yellow for debugging)
+  - `showDetectionInfo`: Real-time stats label (targets checked, phase results)
+- **Persistent vs temporary visuals**
+  - Detection sphere and vision cone update every frame
+  - Raycasts and phase markers are temporary (0.05s duration)
+  - Debug instances stored in `self.debugInstances` for cleanup
+- **Configuration in DebugConfig**
+  - All visual options configurable per-phase
+  - Integrated with Controller debug setup
+- **Files modified**
+  - `VisionSensor.lua`: Complete rewrite with modular architecture
+  - `DebugConfig.lua`: Updated with new visual options
+  - `Controller.lua`: Updated debug initialization
+  - `Registry.lua`: Removed team-based functions

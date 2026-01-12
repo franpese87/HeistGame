@@ -180,13 +180,6 @@ function Registry:FindNPCsInRadius(position, radius)
 	return result
 end
 
-function Registry:GetNPCsByTeam(teamName)
-	return self:Filter(function(npcData)
-		local npcTeam = npcData.pawn:GetInstance():GetAttribute("Team")
-		return npcTeam == teamName
-	end)
-end
-
 function Registry:GetActiveNPCs()
 	return self:Filter(function(npcData)
 		return npcData.controller.isActive

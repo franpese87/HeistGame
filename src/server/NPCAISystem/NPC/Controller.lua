@@ -69,8 +69,8 @@ function Controller.new(pawn, navigationGraph, config)
 	self.hearingSensor = HearingSensor.new(npcInstance, config)
 
 	-- Configuración de Debug visual del sensor
-	if DebugConfig.visuals then
-		self.visionSensor:SetDebug(DebugConfig.visuals.showVisionRays, { showRaycast = DebugConfig.visuals.showVisionRays })
+	if DebugConfig.visuals and DebugConfig.visuals.showVisionDebug then
+		self.visionSensor:SetDebug(true)
 	end
 
 	-- Estado general

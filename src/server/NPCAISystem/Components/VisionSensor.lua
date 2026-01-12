@@ -1,185 +1,228 @@
-local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
-local Debris = game:GetService("Debris")
-local DebugUtilities = require(script.Parent.Parent.Debug.Visualizer)
 
 local VisionSensor = {}
 VisionSensor.__index = VisionSensor
 
+-- ==============================================================================
+-- LOCAL HELPERS
+-- ==============================================================================
+
+local function getDebugFolder()
+	local folder = workspace:FindFirstChild("_VisionDebug")
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = "_VisionDebug"
+		folder.Parent = workspace
+	end
+	return folder
+end
+
+local function createDebugPart(name, shape)
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Shape = shape or Enum.PartType.Ball
+	part.Material = Enum.Material.Neon
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.Anchored = true
+	part.Massless = true
+	part.CastShadow = false
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Parent = getDebugFolder()
+	return part
+end
+
+local function rotateVectorXZ(vec, angle)
+	local cos = math.cos(angle)
+	local sin = math.sin(angle)
+	return Vector3.new(
+		vec.X * cos - vec.Z * sin,
+		0,
+		vec.X * sin + vec.Z * cos
+	).Unit
+end
+
+local function createHorizontalLineCFrame(midpoint, direction)
+	local xAxis = direction
+	local yAxis = Vector3.new(0, 1, 0)
+	local zAxis = xAxis:Cross(yAxis).Unit
+	return CFrame.fromMatrix(midpoint, xAxis, yAxis, zAxis)
+end
+
+local function createLineCFrame(origin, target)
+	local direction = (target - origin).Unit
+	local midpoint = (origin + target) / 2
+	local length = (target - origin).Magnitude
+
+	-- Manejar caso donde la dirección es casi vertical
+	local up = Vector3.new(0, 1, 0)
+	if math.abs(direction:Dot(up)) > 0.99 then
+		up = Vector3.new(1, 0, 0)
+	end
+
+	local xAxis = direction
+	local zAxis = xAxis:Cross(up).Unit
+	local yAxis = zAxis:Cross(xAxis).Unit
+
+	return CFrame.fromMatrix(midpoint, xAxis, yAxis, zAxis), length
+end
+
+-- ==============================================================================
+-- CONSTRUCTOR
+-- ==============================================================================
+
 function VisionSensor.new(npc, config)
 	local self = setmetatable({}, VisionSensor)
 
-	self.npc = npc
 	self.rootPart = npc:FindFirstChild("HumanoidRootPart")
-	
-	-- Configuración
+
 	config = config or {}
 	self.detectionRange = config.detectionRange or 50
 	self.visionHeight = config.visionHeight or 2
-	self.observationConeAngle = config.observationConeAngle or 90
+	self.coneAngle = config.observationConeAngle or 90
 	self.minDetectionTime = config.minDetectionTime or 0.3
 	self.loseTargetTime = config.loseTargetTime or 3
-	self.coneVisualDuration = config.coneVisualDuration or 0.1
 
-	-- Raycast params
 	self.raycastParams = RaycastParams.new()
 	self.raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	self.raycastParams.FilterDescendantsInstances = {self.npc}
+	self.raycastParams.FilterDescendantsInstances = {npc}
 
-	-- Estado interno de detección
-	self.detectionTimeAccumulator = nil -- Tiempo acumulado viendo al target actual
-	self.lostDetectionTime = nil        -- Momento en que perdimos de vista al target (para el timeout de olvido)
-	self.lastSeenTime = 0               -- Última vez que validamos visualmente (para coyote time)
-	self.currentTarget = nil            -- El target CONFIRMADO actual
-	self.lastSeenPosition = nil         -- Última posición conocida del target
+	-- Estado de detección
+	self.detectionAccumulator = nil
+	self.lostTargetTime = nil
+	self.lastSeenTime = 0
+	self.confirmedTarget = nil
+	self.lastSeenPosition = nil
 
 	-- Debug
 	self.debugEnabled = false
-	self.debugConfig = { showRaycast = false }
+	self.debugInstances = {
+		rangeCircle = nil,
+		coneBoundaryLeft = nil,
+		coneBoundaryRight = nil,
+		losRaycasts = {},
+	}
 
 	return self
 end
 
-function VisionSensor:SetDebug(enabled, config)
+function VisionSensor:SetDebug(enabled)
 	self.debugEnabled = enabled
-	self.debugConfig = config or self.debugConfig
 end
 
 -- ==============================================================================
--- CORE SCAN FUNCTION (MEJORADO)
+-- SCAN - PIPELINE DE DETECCIÓN
 -- ==============================================================================
+--[[
+	Pipeline de detección (de menos a más costoso):
+	- FASE 1: Distance Check (magnitude)
+	- FASE 2: Vision Cone Check (dot product)
+	- FASE 3: Line of Sight Check (raycast)
+]]
 
 function VisionSensor:Scan()
-	local nearestTarget = nil
-	local nearestDistance = self.detectionRange
 	local currentTime = tick()
+	local nearestTarget = nil
+	local nearestDistance = math.huge
 
-	-- 1. Recopilar posibles objetivos (Jugadores + NPCs)
-	local potentialTargets = {}
+	local playerInRange = false
+	local playerInCone = false
+	local losResults = {}
 
-	-- Añadir jugadores
 	for _, player in ipairs(Players:GetPlayers()) do
-		if player.Character then 
-			table.insert(potentialTargets, player.Character) 
+		local character = player.Character
+		if not character then continue end
+		if not self:IsValidTarget(character) then continue end
+
+		local targetRootPart = character.HumanoidRootPart
+
+		-- FASE 1: Distance Check
+		local distance = (self.rootPart.Position - targetRootPart.Position).Magnitude
+		if distance > self.detectionRange then continue end
+		playerInRange = true
+
+		-- FASE 2: Vision Cone Check
+		if not self:IsInsideVisionCone(targetRootPart) then continue end
+		playerInCone = true
+
+		-- FASE 3: Line of Sight Check
+		local hasLOS, losData = self:CheckLineOfSight(targetRootPart)
+		table.insert(losResults, losData)
+
+		if not hasLOS then continue end
+
+		-- Target válido - seleccionar el más cercano
+		if distance < nearestDistance then
+			nearestDistance = distance
+			nearestTarget = character
 		end
 	end
 
-	-- Añadir otros NPCs (Etiquetados con 'Entity' via CollectionService)
-	for _, entity in ipairs(CollectionService:GetTagged("Entity")) do
-		if entity ~= self.npc then -- No detectarse a sí mismo
-			table.insert(potentialTargets, entity)
-		end
-	end
-
-	-- 2. Filtrar y encontrar el más cercano
-	for _, targetChar in ipairs(potentialTargets) do
-		-- Usamos la función auxiliar IsValidTarget para limpiar lógica
-		if self:IsValidTarget(targetChar) then
-			local targetRoot = targetChar.HumanoidRootPart -- IsValidTarget garantiza que existe
-			local distance = (self.rootPart.Position - targetRoot.Position).Magnitude
-
-			if distance < nearestDistance then
-				if self:HasLineOfSight(targetRoot) then
-					nearestDistance = distance
-					nearestTarget = targetChar
-					-- NOTA: No actualizamos lastSeenTime aquí para evitar escrituras innecesarias
-				end
-			end
-		end
-	end
-
-	-- 3. Actualizar estado UNA sola vez con el mejor candidato
 	if nearestTarget then
 		self.lastSeenTime = currentTime
 		self.lastSeenPosition = nearestTarget.HumanoidRootPart.Position
 	end
 
+	-- Debug visual
+	if self.debugEnabled then
+		self:UpdateRangeCircle(playerInRange)
+		if playerInRange then
+			self:UpdateConeBoundaries(playerInCone)
+			if playerInCone then
+				self:UpdateLineOfSight(losResults)
+			else
+				self:ClearLineOfSight()
+			end
+		else
+			self:ClearConeBoundaries()
+			self:ClearLineOfSight()
+		end
+	end
+
 	return self:ProcessDetectionLogic(nearestTarget, currentTime)
 end
 
--- Helper: Valida si un personaje es un objetivo válido (Vivo, Enemigo, etc.)
+-- ==============================================================================
+-- DETECTION PHASES
+-- ==============================================================================
+
 function VisionSensor:IsValidTarget(character)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	local rootPart = character:FindFirstChild("HumanoidRootPart")
-
-	-- A. Validación Física
-	if not humanoid or not rootPart or humanoid.Health <= 0 then
-		return false
-	end
-
-	-- B. Validación de Facciones (Team Check)
-	-- Intenta obtener atributo 'Team' del NPC o del Player
-	local myTeam = self.npc:GetAttribute("Team")
-	local targetTeam = character:GetAttribute("Team")
-
-	-- Si es jugador, sobreescribimos con su Team real de Roblox
-	local player = Players:GetPlayerFromCharacter(character)
-	if player then
-		-- Si el jugador está en un Team, usamos el nombre, sino 'Player' (o nil/Neutral)
-		targetTeam = player.Team and player.Team.Name or "Player"
-	end
-	
-	-- Lógica de Equipos:
-	-- Si ambos tienen equipo y son el mismo, son amigos -> Ignorar.
-	-- Si myTeam es nil, atacamos a cualquiera (comportamiento hostil por defecto).
-	if myTeam and targetTeam and myTeam == targetTeam then
-		return false
-	end
-
-	return true
+	return humanoid and rootPart and humanoid.Health > 0
 end
 
--- ==============================================================================
--- LINE OF SIGHT PHYSICS
--- ==============================================================================
+function VisionSensor:IsInsideVisionCone(targetRootPart)
+	local npcPosition = self.rootPart.Position
+	local targetPosition = targetRootPart.Position
 
-function VisionSensor:HasLineOfSight(targetPart)
-	local origin = self.rootPart.Position + Vector3.new(0, self.visionHeight, 0)
-	local targetPos = targetPart.Position
-	local directionVector = (targetPos - origin)
-	local distance = directionVector.Magnitude
+	local npcLookDirXZ = (self.rootPart.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+	local toTargetDirXZ = ((targetPosition - npcPosition) * Vector3.new(1, 0, 1)).Unit
 
-	-- 1. CHEQUEO DE DISTANCIA
-	if distance > self.detectionRange then 
-		return false 
-	end
+	local dotProduct = npcLookDirXZ:Dot(toTargetDirXZ)
+	local threshold = math.cos(math.rad(self.coneAngle / 2))
 
-	-- 2. CÁLCULO DE ÁNGULO (Cono de visión)
-	local lookVectorFlat = (self.rootPart.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
-	local directionFlat = (directionVector * Vector3.new(1, 0, 1)).Unit
-
-	local dotProduct = lookVectorFlat:Dot(directionFlat)
-	local halfAngleRad = math.rad(self.observationConeAngle / 2)
-	local threshold = math.cos(halfAngleRad)
-
-	if dotProduct < threshold then
-		return false 
-	end
-
-	-- 3. RAYCAST DE OCLUSIÓN
-	return self:CheckOcclusion(origin, directionVector, targetPart)
+	return dotProduct >= threshold
 end
 
-function VisionSensor:CheckOcclusion(origin, direction, targetPart)
+function VisionSensor:CheckLineOfSight(targetRootPart)
+	local head = self.rootPart.Parent:FindFirstChild("Head")
+	local origin = head and head.Position or (self.rootPart.Position + Vector3.new(0, self.visionHeight, 0))
+	local targetPosition = targetRootPart.Position
+	local direction = targetPosition - origin
+
 	local result = workspace:Raycast(origin, direction, self.raycastParams)
-	local canSee = false
+	local hasLOS = result and result.Instance:IsDescendantOf(targetRootPart.Parent)
 
-	if result and result.Instance:IsDescendantOf(targetPart.Parent) then
-		canSee = true
-	end
+	local losData = {
+		origin = origin,
+		hitPoint = result and result.Position or targetPosition,
+		hasLOS = hasLOS,
+	}
 
-	-- DEBUG VISUAL
-	if self.debugEnabled and self.debugConfig.showRaycast then
-		local debugColor = canSee and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
-		DebugUtilities.VisualizeRaycast(origin, direction, result, {
-			hitColor = debugColor,
-			missColor = debugColor,
-			duration = 0.1,
-			width = 0.1
-		})
-	end
-
-	return canSee
+	return hasLOS, losData
 end
 
 -- ==============================================================================
@@ -188,63 +231,178 @@ end
 
 function VisionSensor:ProcessDetectionLogic(visibleTarget, currentTime)
 	local COYOTE_TIME = 0.5
-	local deltaTime = 0.03 -- Aproximación si no se pasa delta, suficiente para lógica de buffer
-	
+	local DELTA_TIME = 0.03
+
 	local timeSinceLastSight = currentTime - self.lastSeenTime
 	local inCoyoteTime = timeSinceLastSight < COYOTE_TIME
-	local isPhysicallyVisible = visibleTarget ~= nil
+	local isCurrentlyVisible = visibleTarget ~= nil
 
-	-- EVENTOS DE RETORNO
 	local events = {
-		TargetConfirmed = false,  -- Se acaba de confirmar un target nuevo
-		TargetLost = false,       -- Se ha olvidado definitivamente al target
-		TargetSpotting = false    -- Se está viendo al target (útil para UI de alerta)
+		TargetConfirmed = false,
+		TargetLost = false,
+		TargetSpotting = false
 	}
 
-	-- CASO 1: TE VEO (Física o Mentalmente por buffer)
-	if isPhysicallyVisible then
-		self.detectionTimeAccumulator = (self.detectionTimeAccumulator or 0) + deltaTime
-		self.lostDetectionTime = nil -- Reset de olvido
+	if isCurrentlyVisible then
+		-- Target visible: acumular tiempo de detección
+		self.detectionAccumulator = (self.detectionAccumulator or 0) + DELTA_TIME
+		self.lostTargetTime = nil
 
-		-- Confirmación de target
-		if self.detectionTimeAccumulator >= self.minDetectionTime then
-			if self.currentTarget ~= visibleTarget then
-				self.currentTarget = visibleTarget
+		if self.detectionAccumulator >= self.minDetectionTime then
+			if self.confirmedTarget ~= visibleTarget then
+				self.confirmedTarget = visibleTarget
 				events.TargetConfirmed = true
 			end
 			events.TargetSpotting = true
 		end
 
-	elseif inCoyoteTime and self.detectionTimeAccumulator and self.detectionTimeAccumulator > 0 then
-		-- CASO 2: COYOTE TIME (No hacemos nada, mantenemos el estado)
+	elseif inCoyoteTime and self.detectionAccumulator and self.detectionAccumulator > 0 then
+		-- Coyote time: mantener estado
 		events.TargetSpotting = true
-		
+
 	else
-		-- CASO 3: NO TE VEO
-		if self.detectionTimeAccumulator and self.detectionTimeAccumulator > 0 then
-			self.detectionTimeAccumulator = self.detectionTimeAccumulator - (deltaTime * 2)
-			if self.detectionTimeAccumulator <= 0 then
-				self.detectionTimeAccumulator = nil
+		-- No visible: decrementar acumulador
+		if self.detectionAccumulator and self.detectionAccumulator > 0 then
+			self.detectionAccumulator = self.detectionAccumulator - (DELTA_TIME * 2)
+			if self.detectionAccumulator <= 0 then
+				self.detectionAccumulator = nil
 			end
 		end
 
-		-- Lógica de olvidar (Memoria a largo plazo)
-		if self.currentTarget then
-			if not self.lostDetectionTime then
-				self.lostDetectionTime = currentTime
+		-- Lógica de olvidar target
+		if self.confirmedTarget then
+			if not self.lostTargetTime then
+				self.lostTargetTime = currentTime
 			end
 
-			local timeLost = currentTime - self.lostDetectionTime
-			if timeLost >= self.loseTargetTime then
+			if currentTime - self.lostTargetTime >= self.loseTargetTime then
 				events.TargetLost = true
-				self.currentTarget = nil
-				self.lostDetectionTime = nil
-				self.detectionTimeAccumulator = nil
+				self.confirmedTarget = nil
+				self.lostTargetTime = nil
+				self.detectionAccumulator = nil
 			end
 		end
 	end
 
-	return self.currentTarget, self.lastSeenPosition, events
+	return self.confirmedTarget, self.lastSeenPosition, events
+end
+
+-- ==============================================================================
+-- DEBUG VISUAL
+-- ==============================================================================
+
+-- Fase 1: Círculo de rango de detección (blanco = no detectado, rojo = detectado)
+function VisionSensor:UpdateRangeCircle(playerInRange)
+	if not self.debugInstances.rangeCircle then
+		local circle = createDebugPart("RangeCircle", Enum.PartType.Cylinder)
+		circle.Transparency = 0.95
+		self.debugInstances.rangeCircle = circle
+	end
+
+	local circle = self.debugInstances.rangeCircle
+	circle.Color = playerInRange and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(255, 255, 255)
+	circle.Size = Vector3.new(0.2, self.detectionRange * 2, self.detectionRange * 2)
+
+	local npcPosition = self.rootPart.Position
+	local groundY = npcPosition.Y - (self.rootPart.Size.Y / 2) + 0.1
+	circle.CFrame = CFrame.new(npcPosition.X, groundY, npcPosition.Z) * CFrame.Angles(0, 0, math.rad(90))
+end
+
+function VisionSensor:ClearRangeCircle()
+	if self.debugInstances.rangeCircle then
+		self.debugInstances.rangeCircle:Destroy()
+		self.debugInstances.rangeCircle = nil
+	end
+end
+
+-- Fase 2: Límites del cono de visión (blanco = no detectado, rojo = detectado)
+function VisionSensor:UpdateConeBoundaries(playerInCone)
+	if not self.debugInstances.coneBoundaryLeft then
+		local line = createDebugPart("ConeBoundaryLeft", Enum.PartType.Cylinder)
+		line.Transparency = 0.3
+		self.debugInstances.coneBoundaryLeft = line
+	end
+	if not self.debugInstances.coneBoundaryRight then
+		local line = createDebugPart("ConeBoundaryRight", Enum.PartType.Cylinder)
+		line.Transparency = 0.3
+		self.debugInstances.coneBoundaryRight = line
+	end
+
+	local leftLine = self.debugInstances.coneBoundaryLeft
+	local rightLine = self.debugInstances.coneBoundaryRight
+
+	local boundaryColor = playerInCone and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(255, 255, 255)
+	leftLine.Color = boundaryColor
+	rightLine.Color = boundaryColor
+
+	local npcPosition = self.rootPart.Position
+	local groundY = npcPosition.Y - (self.rootPart.Size.Y / 2) + 0.15
+	local centerPoint = Vector3.new(npcPosition.X, groundY, npcPosition.Z)
+
+	local npcLookDirXZ = (self.rootPart.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+	local halfAngle = math.rad(self.coneAngle / 2)
+
+	local leftBoundaryDir = rotateVectorXZ(npcLookDirXZ, halfAngle)
+	local rightBoundaryDir = rotateVectorXZ(npcLookDirXZ, -halfAngle)
+
+	local boundaryLength = self.detectionRange
+	local leftEndPoint = centerPoint + (leftBoundaryDir * boundaryLength)
+	local rightEndPoint = centerPoint + (rightBoundaryDir * boundaryLength)
+
+	local leftMidpoint = (centerPoint + leftEndPoint) / 2
+	leftLine.Size = Vector3.new(boundaryLength, 0.15, 0.15)
+	leftLine.CFrame = createHorizontalLineCFrame(leftMidpoint, leftBoundaryDir)
+
+	local rightMidpoint = (centerPoint + rightEndPoint) / 2
+	rightLine.Size = Vector3.new(boundaryLength, 0.15, 0.15)
+	rightLine.CFrame = createHorizontalLineCFrame(rightMidpoint, rightBoundaryDir)
+end
+
+function VisionSensor:ClearConeBoundaries()
+	if self.debugInstances.coneBoundaryLeft then
+		self.debugInstances.coneBoundaryLeft:Destroy()
+		self.debugInstances.coneBoundaryLeft = nil
+	end
+	if self.debugInstances.coneBoundaryRight then
+		self.debugInstances.coneBoundaryRight:Destroy()
+		self.debugInstances.coneBoundaryRight = nil
+	end
+end
+
+-- Fase 3: Líneas de raycast (blanco = no detectado/bloqueado, rojo = detectado)
+function VisionSensor:UpdateLineOfSight(losResults)
+	local existingLines = self.debugInstances.losRaycasts
+	local requiredCount = #losResults
+
+	-- Crear líneas adicionales si es necesario
+	for i = #existingLines + 1, requiredCount do
+		local line = createDebugPart("LOSRaycast_" .. i, Enum.PartType.Cylinder)
+		line.Transparency = 0.3
+		existingLines[i] = line
+	end
+
+	-- Destruir líneas sobrantes
+	for i = requiredCount + 1, #existingLines do
+		existingLines[i]:Destroy()
+		existingLines[i] = nil
+	end
+
+	-- Actualizar cada línea con los datos del raycast
+	for i, losData in ipairs(losResults) do
+		local line = existingLines[i]
+		local lineCFrame, lineLength = createLineCFrame(losData.origin, losData.hitPoint)
+
+		line.Size = Vector3.new(lineLength, 0.1, 0.1)
+		line.CFrame = lineCFrame
+		line.Color = losData.hasLOS and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(255, 255, 255)
+	end
+end
+
+function VisionSensor:ClearLineOfSight()
+	for i, line in ipairs(self.debugInstances.losRaycasts) do
+		line:Destroy()
+		self.debugInstances.losRaycasts[i] = nil
+	end
 end
 
 return VisionSensor
