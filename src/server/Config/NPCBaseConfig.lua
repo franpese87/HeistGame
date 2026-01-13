@@ -29,6 +29,17 @@ return {
 	observationHeadRatio = 0.7,   -- 70% del ángulo para la cabeza
 	observationTorsoRatio = 0.3,  -- 30% del ángulo para el torso
 
+	-- Rotación en combate
+	attackRotationSpeed = 0.15,  -- Alpha para LerpCFrame en ATTACKING (0.1-0.3)
+
+	-- Rotación por capas en estado ALERTED (deben sumar 1.0)
+	alertedHeadRatio = 0.8,   -- 80% del ángulo para la cabeza (reacción rápida)
+	alertedTorsoRatio = 0.2,  -- 20% del ángulo para el torso
+
+	-- Head tracking durante CHASING
+	enableHeadTrackingDuringChase = true,  -- Toggle para activar/desactivar
+	headTrackingMaxAngle = 90,             -- Límite de rotación de cabeza (grados)
+
 	-- Navegación
 	-- Distancia a la que el NPC deja de usar el grafo y se acerca directamente al target para atacar
 	directApproachDistance = 8,

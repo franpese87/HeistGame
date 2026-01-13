@@ -66,10 +66,24 @@ function Controller.new(pawn, navigationGraph, config)
 	self.observationHeadRatio = config.observationHeadRatio or 0.7
 	self.observationTorsoRatio = config.observationTorsoRatio or 0.3
 
+	-- Rotación en combate
+	self.attackRotationSpeed = config.attackRotationSpeed or 0.15
+
 	-- Reacción (tiempo en estado ALERTED antes de CHASING)
 	self.reactionTime = config.reactionTime or 0.8
 	self.alertedRotationTime = 0.4  -- Rotación rápida fija (independiente de reactionTime)
 	self.alertedTweenInfo = TweenInfo.new(self.alertedRotationTime, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+
+	-- Ratios de rotación por capas en ALERTED (deben sumar 1.0)
+	self.alertedHeadRatio = config.alertedHeadRatio or 0.8
+	self.alertedTorsoRatio = config.alertedTorsoRatio or 0.2
+
+	-- Head tracking durante CHASING
+	self.enableHeadTrackingDuringChase = config.enableHeadTrackingDuringChase
+	if self.enableHeadTrackingDuringChase == nil then
+		self.enableHeadTrackingDuringChase = true
+	end
+	self.headTrackingMaxAngle = config.headTrackingMaxAngle or 90
 
 	-- Investigación (duración = tiempo total de observación en un nodo de patrulla)
 	self.investigationDuration = #self.observationAngles * self.observationTimePerAngle
@@ -416,18 +430,39 @@ function Controller:EnterAlerted()
 	-- Mostrar indicador "!"
 	self:CreateAlertIndicator()
 
-	-- Giro suave hacia el target
+	-- Rotación por capas head-dominant hacia el target
 	if self.target then
 		local targetRoot = self.target:FindFirstChild("HumanoidRootPart")
 		if targetRoot then
-			local npcPos = self.pawn:GetPosition()
-			local targetPos = targetRoot.Position
-			local direction = (targetPos - npcPos) * Vector3.new(1, 0, 1)
+			local currentPos = self.pawn:GetPosition()
+			local directionToTarget = (targetRoot.Position - currentPos) * Vector3.new(1, 0, 1)
 
-			if direction.Magnitude > 0.1 then
-				local targetCFrame = CFrame.lookAt(npcPos, npcPos + direction.Unit)
-				self.pawn:RotateWithTween(targetCFrame, self.alertedTweenInfo)
+			if directionToTarget.Magnitude > 0.1 then
+				-- Calcular ángulo hacia el target desde la orientación actual
+				local lookVector = self.pawn:GetLookVector()
+				local bodyAngle = math.atan2(lookVector.X, lookVector.Z)
+				local targetAngle = math.atan2(directionToTarget.X, directionToTarget.Z)
+				local angle = math.deg(targetAngle - bodyAngle)
+
+				-- Normalizar ángulo a [-180, 180]
+				if angle > 180 then
+					angle = angle - 360
+				end
+				if angle < -180 then
+					angle = angle + 360
+				end
+
+				-- Guardar CFrame actual como base
+				self.originalCFrame = self.pawn:GetCFrame()
+
+				-- Aplicar rotación por capas (cabeza 80%, torso 20%)
+				self.pawn:RotateLayered(angle, {
+					head = self.alertedHeadRatio,
+					torso = self.alertedTorsoRatio,
+				}, self.alertedTweenInfo)
 			end
+
+			self.lastSeenPosition = targetRoot.Position
 		end
 	end
 end
@@ -456,6 +491,8 @@ end
 
 function Controller:ExitAlerted()
 	self.pawn:CancelRotationTween()
+	self.pawn:ResetLayeredRotation(self.alertedTweenInfo)
+	self.originalCFrame = nil
 	self.pawn:SetAutoRotate(true)
 	self:ClearAlertIndicator()
 end
@@ -464,7 +501,55 @@ end
 -- CHASING
 -- ==============================================================================
 
+-- Tracking de cabeza hacia el target durante persecución
+function Controller:UpdateHeadTracking()
+	if not self.target or not self.enableHeadTrackingDuringChase then
+		return
+	end
+
+	local targetRoot = self.target:FindFirstChild("HumanoidRootPart")
+	if not targetRoot then
+		return
+	end
+
+	local currentPos = self.pawn:GetPosition()
+	local targetPos = targetRoot.Position
+	local directionToTarget = (targetPos - currentPos) * Vector3.new(1, 0, 1)
+
+	if directionToTarget.Magnitude < 0.1 then
+		return
+	end
+
+	-- Calcular ángulo hacia el target relativo al cuerpo
+	local bodyLookVector = self.pawn:GetLookVector()
+	local targetLookVector = directionToTarget.Unit
+
+	local bodyAngle = math.atan2(bodyLookVector.X, bodyLookVector.Z)
+	local targetAngle = math.atan2(targetLookVector.X, targetLookVector.Z)
+	local headAngle = math.deg(targetAngle - bodyAngle)
+
+	-- Normalizar a [-180, 180]
+	if headAngle > 180 then
+		headAngle = headAngle - 360
+	end
+	if headAngle < -180 then
+		headAngle = headAngle + 360
+	end
+
+	-- Limitar rotación de cabeza (no más de headTrackingMaxAngle grados)
+	headAngle = math.clamp(headAngle, -self.headTrackingMaxAngle, self.headTrackingMaxAngle)
+
+	-- Aplicar rotación solo a la cabeza (instantánea para tracking responsive)
+	if self.pawn.neck and self.pawn.neckOriginalC0 then
+		local targetC0 = CFrame.Angles(0, math.rad(headAngle), 0) * self.pawn.neckOriginalC0
+		self.pawn.neck.C0 = targetC0
+	end
+end
+
 function Controller:UpdateChasing()
+	-- Head tracking del target mientras persigue
+	self:UpdateHeadTracking()
+
 	self.pawn:SetChaseSpeed()
 	self.pawn:PlayAnimation("run")
 
@@ -619,7 +704,13 @@ function Controller:UpdateAttacking()
 		return
 	end
 
-	self.pawn:LookAt(targetRoot.Position)
+	-- Rotación suave con interpolación hacia el target
+	local targetDirection = (targetRoot.Position - self.pawn:GetPosition()) * Vector3.new(1, 0, 1)
+	if targetDirection.Magnitude > 0.1 then
+		local targetCFrame = CFrame.lookAt(self.pawn:GetPosition(), self.pawn:GetPosition() + targetDirection)
+		self.pawn:LerpCFrame(targetCFrame, self.attackRotationSpeed)
+	end
+
 	self.combatSystem:TryAttack(self.target)
 end
 
@@ -779,6 +870,14 @@ function Controller:ChangeState(newState)
 		self:ExitInvestigating()
 	elseif self.currentState == AIState.RETURNING then
 		self:ExitReturning()
+	elseif self.currentState == AIState.CHASING then
+		-- Resetear rotación de cabeza al salir de persecución
+		if self.enableHeadTrackingDuringChase then
+			self.pawn:ResetLayeredRotation(TweenInfo.new(0.2))
+		end
+	elseif self.currentState == AIState.ATTACKING then
+		-- Re-activar AutoRotate al salir de combate
+		self.pawn:SetAutoRotate(true)
 	end
 
 	local oldState = self.currentState
@@ -802,6 +901,9 @@ function Controller:ChangeState(newState)
 	elseif newState == AIState.CHASING then
 		self:ClearPath()
 		self.targetLastPosition = nil
+	elseif newState == AIState.ATTACKING then
+		-- Desactivar AutoRotate para control manual de rotación
+		self.pawn:SetAutoRotate(false)
 	elseif newState == AIState.RETURNING then
 		self:EnterReturning()
 	end
