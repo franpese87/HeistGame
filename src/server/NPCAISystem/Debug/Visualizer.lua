@@ -87,8 +87,6 @@ function Visualizer.DrawCells(graph, options)
 	end
 
 	options = options or {}
-	local transparency = options.cellTransparency or options.transparency or 0.85
-	local wireframe = options.cellWireframe ~= false
 	local cellHeight = options.cellHeight or graph.floorHeight or 10
 
 	-- Colores por piso
@@ -140,17 +138,13 @@ function Visualizer.DrawCells(graph, options)
 			cellPart.Color = color
 			cellPart.Material = Enum.Material.SmoothPlastic
 
-			if wireframe then
-				cellPart.Transparency = 1
-				local selectionBox = Instance.new("SelectionBox")
-				selectionBox.Adornee = cellPart
-				selectionBox.LineThickness = 0.05
-				selectionBox.Color3 = color
-				selectionBox.Transparency = 0.3
-				selectionBox.Parent = cellPart
-			else
-				cellPart.Transparency = transparency
-			end
+			cellPart.Transparency = 1
+			local selectionBox = Instance.new("SelectionBox")
+			selectionBox.Adornee = cellPart
+			selectionBox.LineThickness = 0.05
+			selectionBox.Color3 = color
+			selectionBox.Transparency = 0.3
+			selectionBox.Parent = cellPart
 
 			cellPart.Parent = floorFolder
 
