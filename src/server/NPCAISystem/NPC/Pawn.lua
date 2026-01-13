@@ -71,9 +71,6 @@ function Pawn.new(npcInstance, config)
 		return nil
 	end
 
-	-- TODO: Estudiar si es necesario asignar la propiedad de red al server para este tipo de NPC y evitar stuttering durante la animación de desplazamiento entre nodos.
-	--self.rootPart:SetNetworkOwner(nil)
-
 	-- Configuración de velocidades
 	config = config or {}
 	self.patrolSpeed = config.patrolSpeed or 16

@@ -107,6 +107,12 @@ function Factory.SpawnAndSetupNPC(template, graph, patrolRouteNames, config, par
 	local npc = template:Clone()
 	npc.Parent = parentFolder or workspace
 
+	-- Asignar ownership de red al servidor para evitar stuttering
+	local rootPart = npc:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		rootPart:SetNetworkOwner(nil)
+	end
+
 	-- 1. Crear Pawn (representación física)
 	local pawn = Pawn.new(npc, config)
 	if not pawn then
