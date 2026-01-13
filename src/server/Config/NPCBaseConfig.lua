@@ -24,6 +24,11 @@ return {
 	-- investigationDuration se calcula automáticamente como:
 	-- #observationAngles × observationTimePerAngle (ej: 4 × 1.5 = 6s)
 
+	-- Rotación por capas durante observación (deben sumar 1.0)
+	-- Distribuye el ángulo entre cabeza y torso
+	observationHeadRatio = 0.7,   -- 70% del ángulo para la cabeza
+	observationTorsoRatio = 0.3,  -- 30% del ángulo para el torso
+
 	-- Navegación
 	-- Distancia a la que el NPC deja de usar el grafo y se acerca directamente al target para atacar
 	directApproachDistance = 8,

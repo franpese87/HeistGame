@@ -62,6 +62,10 @@ function Controller.new(pawn, navigationGraph, config)
 	self.observationTimePerAngle = config.observationTimePerAngle or 1.0
 	self.rotationTweenInfo = TweenInfo.new(self.observationTimePerAngle * 0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
 
+	-- Ratios de rotación por capas (deben sumar 1.0)
+	self.observationHeadRatio = config.observationHeadRatio or 0.7
+	self.observationTorsoRatio = config.observationTorsoRatio or 0.3
+
 	-- Reacción (tiempo en estado ALERTED antes de CHASING)
 	self.reactionTime = config.reactionTime or 0.8
 	self.alertedRotationTime = 0.4  -- Rotación rápida fija (independiente de reactionTime)
@@ -292,6 +296,7 @@ function Controller:EnterObserving()
 	self.pawn:StopMovement()
 	self.pawn:SetAutoRotate(false)
 	self.pawn:PlayAnimation("idle")
+
 	self:RotateToObservationAngle(self.observationAngles[1])
 end
 
@@ -310,6 +315,7 @@ end
 
 function Controller:ExitObserving()
 	self.pawn:CancelRotationTween()
+	self.pawn:ResetLayeredRotation(self.rotationTweenInfo)
 	self.currentObservationIndex = 1
 	self.originalCFrame = nil
 	self.pawn:SetAutoRotate(true)
@@ -317,8 +323,12 @@ end
 
 function Controller:RotateToObservationAngle(angle)
 	if not self.originalCFrame then return end
-	local targetCFrame = self.originalCFrame * CFrame.Angles(0, math.rad(angle), 0)
-	self.pawn:RotateWithTween(targetCFrame, self.rotationTweenInfo)
+
+	-- Rotación por capas: cabeza 70%, torso 30%
+	self.pawn:RotateLayered(angle, {
+		head = self.observationHeadRatio,
+		torso = self.observationTorsoRatio,
+	}, self.rotationTweenInfo)
 end
 
 -- ==============================================================================
@@ -619,6 +629,9 @@ end
 
 function Controller:EnterInvestigating()
 	self.investigationStartTime = tick()
+	self.investigationObservationIndex = 1
+	self.investigationObservationTime = 0
+	self.investigationIsObserving = false
 	self.pawn:SetAutoRotate(true)
 
 	if self.lastSeenPosition then
@@ -645,32 +658,63 @@ function Controller:UpdateInvestigating()
 	end
 
 	if self.currentPath and #self.currentPath > 0 then
+		-- Navegando hacia la última posición vista
 		self.pawn:PlayAnimation("walk")
 		self:FollowCurrentPath()
 	else
-		self.pawn:SetAutoRotate(false)
+		-- Llegó a la posición: observar usando rotación por capas
 		self.pawn:StopMovement()
 		self.pawn:PlayAnimation("idle")
 
-		local currentPos = self.pawn:GetPosition()
+		-- Iniciar observación si aún no empezó
+		if not self.investigationIsObserving then
+			self.investigationIsObserving = true
+			self.investigationObservationTime = tick()
+			self.pawn:SetAutoRotate(false)
 
-		if self.investigationTarget then
-			local directionToTarget = (self.investigationTarget - currentPos)
-			directionToTarget = Vector3.new(directionToTarget.X, 0, directionToTarget.Z).Unit
+			-- Mirar hacia la posición objetivo como base y guardar como originalCFrame
+			local currentPos = self.pawn:GetPosition()
+			if self.investigationTarget then
+				local directionToTarget = (self.investigationTarget - currentPos) * Vector3.new(1, 0, 1)
+				if directionToTarget.Magnitude > 0.1 then
+					self.originalCFrame = CFrame.lookAt(currentPos, currentPos + directionToTarget)
+					self.pawn:SetCFrame(self.originalCFrame)
+				else
+					self.originalCFrame = self.pawn:GetCFrame()
+				end
+			else
+				self.originalCFrame = self.pawn:GetCFrame()
+			end
 
-			local timeInState = tick() - self.investigationStartTime
-			local lookAngle = math.sin(timeInState * 2) * 45
+			-- Iniciar primera rotación por capas
+			self:RotateToObservationAngle(self.observationAngles[self.investigationObservationIndex])
+		end
 
-			local baseCFrame = CFrame.lookAt(currentPos, currentPos + directionToTarget)
-			local newCFrame = baseCFrame * CFrame.Angles(0, math.rad(lookAngle), 0)
-			self.pawn:LerpCFrame(newCFrame, 0.1)
+		-- Rotar por los ángulos de observación
+		local currentTime = tick()
+		if currentTime - self.investigationObservationTime >= self.observationTimePerAngle then
+			self.investigationObservationIndex = self.investigationObservationIndex + 1
+			if self.investigationObservationIndex > #self.observationAngles then
+				self.investigationObservationIndex = 1  -- Repetir el ciclo
+			end
+			self.investigationObservationTime = currentTime
+			self:RotateToObservationAngle(self.observationAngles[self.investigationObservationIndex])
 		end
 	end
 end
 
 function Controller:ExitInvestigating()
+	-- Resetear rotación por capas si estaba observando
+	if self.investigationIsObserving then
+		self.pawn:ResetLayeredRotation(self.rotationTweenInfo)
+		self.investigationIsObserving = false
+	end
+
 	self.investigationStartTime = nil
 	self.investigationTarget = nil
+	self.investigationObservationIndex = 1
+	self.investigationObservationTime = 0
+	self.originalCFrame = nil
 	self.pawn:SetAutoRotate(true)
 	self:ClearPath()
 

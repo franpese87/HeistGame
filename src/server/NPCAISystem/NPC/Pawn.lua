@@ -71,6 +71,24 @@ function Pawn.new(npcInstance, config)
 		return nil
 	end
 
+	-- Referencias a Motor6Ds para rotación por capas (R6)
+	local torso = npcInstance:FindFirstChild("Torso")
+	self.neck = torso and torso:FindFirstChild("Neck")
+	-- RootJoint puede estar en HumanoidRootPart o en Torso según el modelo
+	self.rootJoint = self.rootPart:FindFirstChild("RootJoint") or (torso and torso:FindFirstChild("RootJoint"))
+
+	-- Guardar CFrames originales para reset
+	self.neckOriginalC0 = self.neck and self.neck.C0
+	self.rootJointOriginalC0 = self.rootJoint and self.rootJoint.C0
+
+	-- Debug: verificar que se encontraron los Motor6Ds
+	if not self.neck then
+		warn("[Pawn] " .. npcInstance.Name .. ": Neck Motor6D no encontrado")
+	end
+	if not self.rootJoint then
+		warn("[Pawn] " .. npcInstance.Name .. ": RootJoint Motor6D no encontrado")
+	end
+
 	-- Configuración de velocidades
 	config = config or {}
 	self.patrolSpeed = config.patrolSpeed or 16
@@ -252,6 +270,45 @@ end
 
 function Pawn:CancelRotationTween()
 	self.janitor:Remove("rotationTween")
+end
+
+-- ==============================================================================
+-- ROTACIÓN POR CAPAS (Observación realista - solo cabeza y torso)
+-- ==============================================================================
+
+-- Rota cabeza y torso con diferentes proporciones usando C0
+-- Los ratios deben sumar 1.0 para que el ángulo visual final sea correcto
+function Pawn:RotateLayered(angle, ratios, tweenInfo)
+	local headAngle = angle * (ratios.head or 0.7)
+	local torsoAngle = angle * (ratios.torso or 0.3)
+
+	-- Rotar cabeza (Neck.C0)
+	if self.neck and self.neckOriginalC0 then
+		local targetC0 = CFrame.Angles(0, math.rad(headAngle), 0) * self.neckOriginalC0
+		local neckTween = TweenService:Create(self.neck, tweenInfo, {C0 = targetC0})
+		self.janitor:Add(neckTween, "Cancel", "neckTween")
+		neckTween:Play()
+	end
+
+	-- Rotar torso (RootJoint.C0)
+	if self.rootJoint and self.rootJointOriginalC0 then
+		local targetC0 = CFrame.Angles(0, math.rad(torsoAngle), 0) * self.rootJointOriginalC0
+		local torsoTween = TweenService:Create(self.rootJoint, tweenInfo, {C0 = targetC0})
+		self.janitor:Add(torsoTween, "Cancel", "torsoTween")
+		torsoTween:Play()
+	end
+end
+
+-- Restaura las rotaciones de cabeza y torso a sus valores originales
+function Pawn:ResetLayeredRotation(tweenInfo)
+	if self.neck and self.neckOriginalC0 then
+		local tween = TweenService:Create(self.neck, tweenInfo, {C0 = self.neckOriginalC0})
+		tween:Play()
+	end
+	if self.rootJoint and self.rootJointOriginalC0 then
+		local tween = TweenService:Create(self.rootJoint, tweenInfo, {C0 = self.rootJointOriginalC0})
+		tween:Play()
+	end
 end
 
 -- ==============================================================================

@@ -77,6 +77,7 @@ function VisionSensor.new(npc, config)
 	local self = setmetatable({}, VisionSensor)
 
 	self.rootPart = npc:FindFirstChild("HumanoidRootPart")
+	self.head = npc:FindFirstChild("Head")
 
 	config = config or {}
 	self.detectionRange = config.detectionRange or 50
@@ -108,6 +109,14 @@ end
 
 function VisionSensor:SetDebug(enabled)
 	self.debugEnabled = enabled
+end
+
+-- Obtiene la dirección de visión (usa la cabeza si está disponible)
+function VisionSensor:GetLookDirection()
+	if self.head then
+		return (self.head.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+	end
+	return (self.rootPart.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
 end
 
 -- ==============================================================================
@@ -199,7 +208,7 @@ function VisionSensor:IsInsideVisionCone(targetRootPart)
 	local npcPosition = self.rootPart.Position
 	local targetPosition = targetRootPart.Position
 
-	local npcLookDirXZ = (self.rootPart.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+	local npcLookDirXZ = self:GetLookDirection()
 	local toTargetDirXZ = ((targetPosition - npcPosition) * Vector3.new(1, 0, 1)).Unit
 
 	local dotProduct = npcLookDirXZ:Dot(toTargetDirXZ)
@@ -318,7 +327,7 @@ function VisionSensor:UpdateConeBoundaries(playerInCone)
 	local groundY = npcPosition.Y - (self.rootPart.Size.Y / 2) + 0.15
 	local centerPoint = Vector3.new(npcPosition.X, groundY, npcPosition.Z)
 
-	local npcLookDirXZ = (self.rootPart.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+	local npcLookDirXZ = self:GetLookDirection()
 	local halfAngle = math.rad(self.coneAngle / 2)
 
 	local leftBoundaryDir = rotateVectorXZ(npcLookDirXZ, halfAngle)
