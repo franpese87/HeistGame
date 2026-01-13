@@ -202,7 +202,6 @@ function Factory.SpawnAllNPCs(template, graph, npcSpawnList, baseConfig)
 					raycastDuration = 0.1,
 					showPath = DebugConfig.visuals.showNPCPaths,
 					showLastSeenPosition = DebugConfig.visuals.showLastSeenPosition,
-					showDebugLabels = DebugConfig.visuals.showDebugLabels,
 				})
 			end
 

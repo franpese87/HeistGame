@@ -630,7 +630,6 @@ function Controller:EnterInvestigating()
 		if self.debugEnabled and self.debugConfig.showLastSeenPosition then
 			Visualizer.DrawLastSeenPosition(self.pawn:GetName(), self.investigationTarget, {
 				duration = self.investigationDuration,
-				showLabels = self.debugConfig.showDebugLabels,
 			})
 		end
 

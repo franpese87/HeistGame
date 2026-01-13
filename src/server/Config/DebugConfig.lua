@@ -6,16 +6,12 @@ return {
 	-- ==============================================================================
 
 	-- Flag maestro: activa la visualizacion al iniciar
-	visualizeOnStartup = false,
+	visualizeOnStartup = true,
 
 	-- Elementos a visualizar
 	showNodes = true,
 	showCells = false,
-	showConnections = true,
-
-	-- Estilo de celdas del spatial hash
-	cellTransparency = 0.85,
-	cellWireframe = true,
+	showConnections = false,
 
 	-- ==============================================================================
 	-- DEBUG VISUAL DE NPCs
@@ -29,7 +25,7 @@ return {
 		showNoiseSpheres = true,
 		showNPCPaths = true,
 		showLastSeenPosition = true,
-		showDebugLabels = true,
+		showStateIndicator = true,
 	},
 
 	-- ==============================================================================

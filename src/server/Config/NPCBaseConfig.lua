@@ -35,6 +35,5 @@ return {
 	agentRadius = 1.0,
 
 	-- Indicador visual de estado (debug)
-	showStateIndicator = false,
 	stateIndicatorOffset = 4,
 }

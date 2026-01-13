@@ -15,6 +15,8 @@ local Visualizer = {}
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 
+local DebugConfig = require(script.Parent.Parent.Parent.Config.DebugConfig)
+
 -- ==============================================================================
 -- HELPERS INTERNOS
 -- ==============================================================================
@@ -325,7 +327,6 @@ function Visualizer.EnableNPCDebug(ai, options)
 		showPath = options.showPath or false,
 		pathColor = options.pathColor or Color3.fromRGB(255, 165, 0),
 		showLastSeenPosition = options.showLastSeenPosition or false,
-		showDebugLabels = options.showDebugLabels ~= false,
 	}
 end
 
@@ -474,7 +475,6 @@ local activeLastSeenSpheres = {}
 	    - color: Color de la esfera (default: rojo)
 	    - size: Tamaño de la esfera (default: 2)
 	    - startTransparency: Transparencia inicial (default: 0.3)
-	    - showLabels: Mostrar etiqueta de texto (default: true)
 ]]
 function Visualizer.DrawLastSeenPosition(npcName, position, options)
 	options = options or {}
@@ -482,7 +482,6 @@ function Visualizer.DrawLastSeenPosition(npcName, position, options)
 	local color = options.color or Color3.fromRGB(255, 100, 100)
 	local size = options.size or 2
 	local startTransparency = options.startTransparency or 0.3
-	local showLabels = options.showLabels ~= false
 	local quickFadeDuration = 0.4
 
 	if not position then return end
@@ -531,19 +530,15 @@ function Visualizer.DrawLastSeenPosition(npcName, position, options)
 	sphere.Material = Enum.Material.Neon
 	sphere.Parent = workspace
 
-	-- Etiqueta (opcional)
-	local label = nil
+	-- Etiqueta
 	local labelTween = nil
-
-	if showLabels then
-		label = CreateBillboardLabel(sphere, "Last Seen", {
-			size = UDim2.fromOffset(80, 25),
-			offset = Vector3.new(0, size / 2 + 0.5, 0),
-			textSize = 12,
-			strokeTransparency = 0,
-			strokeColor = color,
-		})
-	end
+	local label = CreateBillboardLabel(sphere, "Last Seen", {
+		size = UDim2.fromOffset(80, 25),
+		offset = Vector3.new(0, size / 2 + 0.5, 0),
+		textSize = 12,
+		strokeTransparency = 0,
+		strokeColor = color,
+	})
 
 	-- Fadeout progresivo durante toda la duración
 	local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
@@ -551,13 +546,11 @@ function Visualizer.DrawLastSeenPosition(npcName, position, options)
 	local sphereTween = TweenService:Create(sphere, tweenInfo, { Transparency = 1 })
 	sphereTween:Play()
 
-	if label then
-		labelTween = TweenService:Create(label, tweenInfo, {
-			TextTransparency = 1,
-			TextStrokeTransparency = 1
-		})
-		labelTween:Play()
-	end
+	labelTween = TweenService:Create(label, tweenInfo, {
+		TextTransparency = 1,
+		TextStrokeTransparency = 1
+	})
+	labelTween:Play()
 
 	-- Guardar referencia con datos del tween
 	activeLastSeenSpheres[npcName] = {
@@ -659,7 +652,7 @@ function Visualizer.PrintSystemReport(npcManager, navGraph, spawnedNPCs, baseCon
 	print("    Cono de vision: " .. baseConfig.observationConeAngle .. " grados")
 	print("    Sistema de observacion: " .. #baseConfig.observationAngles .. " angulos x " .. baseConfig.observationTimePerAngle .. "s = " .. (#baseConfig.observationAngles * baseConfig.observationTimePerAngle) .. "s por nodo")
 	print("    Navegacion: grafo (acercamiento directo a " .. baseConfig.directApproachDistance .. " studs)")
-	print("    Indicador de estado: " .. (baseConfig.showStateIndicator and "Activado" or "Desactivado"))
+	print("    Indicador de estado: " .. (DebugConfig.visuals.showStateIndicator and "Activado" or "Desactivado"))
 
 	local nodesKept = workspace:FindFirstChild("NavigationNodes") ~= nil
 	print("    Nodos en workspace: " .. (nodesKept and "Mantenidos (debug)" or "Destruidos (optimizado)"))

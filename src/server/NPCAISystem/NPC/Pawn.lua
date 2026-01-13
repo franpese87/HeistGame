@@ -15,6 +15,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+local DebugConfig = require(script.Parent.Parent.Parent.Config.DebugConfig)
 local Janitor = require(ReplicatedStorage.Packages.janitor)
 
 local Pawn = {}
@@ -70,6 +71,9 @@ function Pawn.new(npcInstance, config)
 		return nil
 	end
 
+	-- TODO: Estudiar si es necesario asignar la propiedad de red al server para este tipo de NPC y evitar stuttering durante la animación de desplazamiento entre nodos.
+	--self.rootPart:SetNetworkOwner(nil)
+
 	-- Configuración de velocidades
 	config = config or {}
 	self.patrolSpeed = config.patrolSpeed or 16
@@ -78,8 +82,8 @@ function Pawn.new(npcInstance, config)
 	-- Inicializar sistema de animaciones
 	self:_InitializeAnimations()
 
-	-- Sistema de indicadores de estado
-	self.showStateIndicator = config.showStateIndicator or false
+	-- Sistema de indicadores de estado (controlado por DebugConfig)
+	self.showStateIndicator = DebugConfig.visuals.showStateIndicator or false
 	self.stateIndicatorOffset = config.stateIndicatorOffset or 4
 	self.stateIndicator = nil
 
