@@ -261,7 +261,28 @@ function Pawn:RotateWithTween(targetCFrame, tweenInfo)
 	-- Janitor cancela automáticamente el tween anterior al reemplazarlo
 	self.janitor:Remove("rotationTween")
 
-	local tween = TweenService:Create(self.rootPart, tweenInfo, {CFrame = targetCFrame})
+	-- Calcular el camino de rotación más corto
+	local currentCFrame = self.rootPart.CFrame
+	local currentPos = currentCFrame.Position
+
+	-- Extraer ángulos Y (rotación horizontal)
+	local _, currentAngleY, _ = currentCFrame:ToOrientation()
+	local _, targetAngleY, _ = targetCFrame:ToOrientation()
+
+	-- Calcular diferencia angular y normalizarla a [-π, π]
+	local angleDiff = targetAngleY - currentAngleY
+
+	-- Normalizar para tomar el camino más corto
+	if angleDiff > math.pi then
+		angleDiff = angleDiff - 2 * math.pi
+	elseif angleDiff < -math.pi then
+		angleDiff = angleDiff + 2 * math.pi
+	end
+
+	-- Crear CFrame objetivo usando el camino más corto
+	local shortestRotationCFrame = CFrame.new(currentPos) * CFrame.Angles(0, currentAngleY + angleDiff, 0)
+
+	local tween = TweenService:Create(self.rootPart, tweenInfo, {CFrame = shortestRotationCFrame})
 	self.janitor:Add(tween, "Cancel", "rotationTween")
 	tween:Play()
 

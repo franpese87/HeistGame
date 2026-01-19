@@ -21,6 +21,9 @@ return {
 		-- Pipeline: Distancia -> Cono -> Line of Sight
 		showVisionDebug = true,
 
+		-- Smart Observation (raycasts de validación de ángulos)
+		showSmartObservation = true,
+
 		-- Otros sistemas
 		showNoiseSpheres = true,
 		showNPCPaths = true,

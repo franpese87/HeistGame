@@ -24,6 +24,9 @@ return {
 	-- investigationDuration se calcula automáticamente como:
 	-- #observationAngles × observationTimePerAngle (ej: 4 × 1.5 = 6s)
 
+	-- Smart observation - validación de entorno
+	observationValidationDistance = 8,  -- Distancia mínima de espacio libre (studs)
+
 	-- Rotación por capas durante observación (deben sumar 1.0)
 	-- Distribuye el ángulo entre cabeza y torso
 	observationHeadRatio = 0.7,   -- 70% del ángulo para la cabeza

@@ -60,6 +60,7 @@ function Controller.new(pawn, navigationGraph, config)
 	-- Observación
 	self.observationAngles = config.observationAngles or {-45, 0, 45, 0}
 	self.observationTimePerAngle = config.observationTimePerAngle or 1.0
+	self.observationValidationDistance = config.observationValidationDistance or 5
 	self.rotationTweenInfo = TweenInfo.new(self.observationTimePerAngle * 0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
 
 	-- Ratios de rotación por capas (deben sumar 1.0)
@@ -126,6 +127,10 @@ function Controller.new(pawn, navigationGraph, config)
 		stateChanges = loggingConfig.stateChanges or false,
 		detection = loggingConfig.detection or false,
 	}
+
+	-- Debug visuals
+	local visualsConfig = DebugConfig.visuals or {}
+	self.showSmartObservation = visualsConfig.showSmartObservation or false
 
 	-- Observación (estado temporal)
 	self.originalCFrame = nil
@@ -288,42 +293,179 @@ end
 -- OBSERVING
 -- ==============================================================================
 
+-- Encuentra la mejor orientación base: la dirección con mayor espacio libre
+function Controller:FindBestObservationOrientation()
+	local currentPos = self.pawn:GetPosition()
+	local visionHeight = 2
+	local rayOrigin = currentPos + Vector3.new(0, visionHeight, 0)
+
+	-- Distancia del raycast (mucho más largo para analizar espacio disponible)
+	local scanDistance = 50  -- 50 studs de alcance
+
+	-- Probar direcciones cada 45° (8 direcciones: N, NE, E, SE, S, SW, W, NW)
+	local testAngles = {0, 45, 90, 135, 180, 225, 270, 315}
+	local raycastResults = {}
+
+	-- Lanzar raycast en cada dirección y medir distancia libre
+	for _, angle in ipairs(testAngles) do
+		local direction = CFrame.Angles(0, math.rad(angle), 0).LookVector
+		local rayDirection = direction * scanDistance
+
+		local raycastParams = RaycastParams.new()
+		raycastParams.FilterDescendantsInstances = {self.pawn:GetInstance()}
+		raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+		local result = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+
+		-- Calcular distancia libre (hasta colisión o máxima)
+		local freeDistance = result and result.Distance or scanDistance
+
+		table.insert(raycastResults, {
+			angle = angle,
+			freeDistance = freeDistance,
+			hitPosition = result and result.Position or (rayOrigin + rayDirection),
+			hasCollision = result ~= nil,
+		})
+	end
+
+	-- SISTEMA DE AGRUPACIÓN POR FOV (Field of View)
+	-- Con observationConeAngle = 90° y rayos cada 45°, cada grupo cubre 3 rayos consecutivos
+	-- Evaluamos áreas de visionado completas en lugar de rayos individuales
+	local rayGroups = {}
+
+	-- Crear grupos deslizantes de 3 rayos consecutivos
+	for i = 1, #raycastResults do
+		local group = {
+			centerIndex = i,
+			rays = {}
+		}
+
+		-- Recopilar 3 rayos consecutivos (con wraparound circular)
+		for offset = -1, 1 do
+			local index = i + offset
+			if index < 1 then
+				index = index + #raycastResults
+			elseif index > #raycastResults then
+				index = index - #raycastResults
+			end
+			table.insert(group.rays, raycastResults[index])
+		end
+
+		-- Calcular métricas del grupo
+		local distances = {}
+		local totalDistance = 0
+		for _, ray in ipairs(group.rays) do
+			table.insert(distances, ray.freeDistance)
+			totalDistance = totalDistance + ray.freeDistance
+		end
+
+		-- Promedio de distancia
+		group.averageDistance = totalDistance / #distances
+
+		-- Desviación estándar (medida de homogeneidad)
+		local variance = 0
+		for _, distance in ipairs(distances) do
+			local diff = distance - group.averageDistance
+			variance = variance + (diff * diff)
+		end
+		group.standardDeviation = math.sqrt(variance / #distances)
+
+		-- Score: priorizar promedio alto y desviación baja (homogeneidad)
+		-- Usamos: score = averageDistance / (1 + standardDeviation)
+		-- Esto penaliza grupos con alta variabilidad
+		group.score = group.averageDistance / (1 + group.standardDeviation)
+
+		table.insert(rayGroups, group)
+	end
+
+	-- Seleccionar el grupo con mejor score
+	local bestGroup = rayGroups[1]
+	for _, group in ipairs(rayGroups) do
+		if group.score > bestGroup.score then
+			bestGroup = group
+		end
+	end
+
+	-- Usar el rayo central del mejor grupo como dirección de orientación
+	local bestDirection = raycastResults[bestGroup.centerIndex]
+
+	-- Crear CFrame orientado hacia la mejor dirección
+	local bestCFrame = CFrame.new(currentPos) * CFrame.Angles(0, math.rad(bestDirection.angle), 0)
+	return bestCFrame
+end
+
+-- Valida si un ángulo de observación es útil (no está bloqueado por pared cercana)
+function Controller:IsObservationAngleValid(angle)
+	if not self.originalCFrame then
+		return true
+	end
+
+	local currentPos = self.pawn:GetPosition()
+
+	-- Calcular dirección después de aplicar el ángulo
+	local rotatedCFrame = self.originalCFrame * CFrame.Angles(0, math.rad(angle), 0)
+	local direction = rotatedCFrame.LookVector
+
+	-- Raycast en esa dirección (a la altura de la vista)
+	local visionHeight = 2  -- Altura estándar de visión
+	local rayOrigin = currentPos + Vector3.new(0, visionHeight, 0)
+	local rayDirection = direction * self.observationValidationDistance
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterDescendantsInstances = {self.pawn:GetInstance()}
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	local result = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+
+	-- Si no hay obstáculo o está lo suficientemente lejos, el ángulo es válido
+	return result == nil or result.Distance >= self.observationValidationDistance
+end
+
 function Controller:EnterObserving()
 	self.currentObservationIndex = 1
 	self.observationStartTime = tick()
-
-	local nextPatrolIndex = self.currentPatrolIndex + 1
-	if nextPatrolIndex > #self.patrolNodes then
-		nextPatrolIndex = 1
-	end
-	local currentNode = self.patrolNodes[self.currentPatrolIndex]
-	local nextNode = self.patrolNodes[nextPatrolIndex]
-	local directionToNext = (nextNode.Position - currentNode.Position) * Vector3.new(1,0,1)
-
-	if directionToNext.Magnitude > 0.1 then
-		self.originalCFrame = CFrame.lookAt(self.pawn:GetPosition(), self.pawn:GetPosition() + directionToNext)
-		self.pawn:SetCFrame(self.originalCFrame)
-	else
-		self.originalCFrame = self.pawn:GetCFrame()
-	end
 
 	self.pawn:StopMovement()
 	self.pawn:SetAutoRotate(false)
 	self.pawn:PlayAnimation("idle")
 
-	self:RotateToObservationAngle(self.observationAngles[1])
+	-- Smart Orientation: Encontrar la mejor orientación base para observar
+	self.originalCFrame = self:FindBestObservationOrientation()
+
+	-- Rotar suavemente hacia la mejor orientación (similar a movimiento de patrullaje)
+	local rotationTweenInfo = TweenInfo.new(
+		0.4,  -- Duración: 0.4 segundos (natural y fluida)
+		Enum.EasingStyle.Sine,
+		Enum.EasingDirection.InOut
+	)
+	self.pawn:RotateWithTween(self.originalCFrame, rotationTweenInfo)
+
+	-- Filtrar ángulos válidos (no bloqueados por paredes)
+	self.validObservationAngles = {}
+	for _, angle in ipairs(self.observationAngles) do
+		if self:IsObservationAngleValid(angle) then
+			table.insert(self.validObservationAngles, angle)
+		end
+	end
+
+	-- Si todos los ángulos están bloqueados, usar solo el centro (0°)
+	if #self.validObservationAngles == 0 then
+		self.validObservationAngles = {0}
+	end
+
+	self:RotateToObservationAngle(self.validObservationAngles[1])
 end
 
 function Controller:UpdateObserving()
 	local currentTime = tick()
 	if currentTime - self.observationStartTime >= self.observationTimePerAngle then
 		self.currentObservationIndex = self.currentObservationIndex + 1
-		if self.currentObservationIndex > #self.observationAngles then
+		if self.currentObservationIndex > #self.validObservationAngles then
 			self:ChangeState(AIState.PATROLLING)
 			return
 		end
 		self.observationStartTime = currentTime
-		self:RotateToObservationAngle(self.observationAngles[self.currentObservationIndex])
+		self:RotateToObservationAngle(self.validObservationAngles[self.currentObservationIndex])
 	end
 end
 
@@ -763,33 +905,43 @@ function Controller:UpdateInvestigating()
 			self.investigationObservationTime = tick()
 			self.pawn:SetAutoRotate(false)
 
-			-- Mirar hacia la posición objetivo como base y guardar como originalCFrame
-			local currentPos = self.pawn:GetPosition()
-			if self.investigationTarget then
-				local directionToTarget = (self.investigationTarget - currentPos) * Vector3.new(1, 0, 1)
-				if directionToTarget.Magnitude > 0.1 then
-					self.originalCFrame = CFrame.lookAt(currentPos, currentPos + directionToTarget)
-					self.pawn:SetCFrame(self.originalCFrame)
-				else
-					self.originalCFrame = self.pawn:GetCFrame()
+			-- Smart Orientation: Encontrar la mejor orientación base para observar
+			self.originalCFrame = self:FindBestObservationOrientation()
+
+			-- Rotar suavemente hacia la mejor orientación
+			local rotationTweenInfo = TweenInfo.new(
+				0.4,  -- Duración: 0.4 segundos (natural y fluida)
+				Enum.EasingStyle.Sine,
+				Enum.EasingDirection.InOut
+			)
+			self.pawn:RotateWithTween(self.originalCFrame, rotationTweenInfo)
+
+			-- Filtrar ángulos válidos (no bloqueados por paredes)
+			self.validInvestigationAngles = {}
+			for _, angle in ipairs(self.observationAngles) do
+				if self:IsObservationAngleValid(angle) then
+					table.insert(self.validInvestigationAngles, angle)
 				end
-			else
-				self.originalCFrame = self.pawn:GetCFrame()
+			end
+
+			-- Si todos los ángulos están bloqueados, usar solo el centro (0°)
+			if #self.validInvestigationAngles == 0 then
+				self.validInvestigationAngles = {0}
 			end
 
 			-- Iniciar primera rotación por capas
-			self:RotateToObservationAngle(self.observationAngles[self.investigationObservationIndex])
+			self:RotateToObservationAngle(self.validInvestigationAngles[self.investigationObservationIndex])
 		end
 
 		-- Rotar por los ángulos de observación
 		local currentTime = tick()
 		if currentTime - self.investigationObservationTime >= self.observationTimePerAngle then
 			self.investigationObservationIndex = self.investigationObservationIndex + 1
-			if self.investigationObservationIndex > #self.observationAngles then
+			if self.investigationObservationIndex > #self.validInvestigationAngles then
 				self.investigationObservationIndex = 1  -- Repetir el ciclo
 			end
 			self.investigationObservationTime = currentTime
-			self:RotateToObservationAngle(self.observationAngles[self.investigationObservationIndex])
+			self:RotateToObservationAngle(self.validInvestigationAngles[self.investigationObservationIndex])
 		end
 	end
 end
