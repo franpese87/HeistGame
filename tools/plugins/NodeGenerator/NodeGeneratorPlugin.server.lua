@@ -182,7 +182,12 @@ local function generateNodesInZone(zonePart, globalSpacing, nodesRoot, zonesFold
 	local startIndex = countExistingNodes(floorFolder)
 
 	-- Lista de elementos a ignorar en el chequeo de colisión
+	-- Incluir carpeta Doors para que los DoorParts no afecten la walkability
+	local doorsFolder = workspace:FindFirstChild("Doors")
 	local ignoreList = {nodesRoot, zonesFolder}
+	if doorsFolder then
+		table.insert(ignoreList, doorsFolder)
+	end
 
 	local walkableCount = 0
 	local nonWalkableCount = 0
@@ -244,7 +249,13 @@ end
 local function canConnect(fromPos, toPos, nodesRoot)
 	local rayParams = RaycastParams.new()
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
-	rayParams.FilterDescendantsInstances = {nodesRoot}
+	-- Ignorar DoorParts para que las conexiones atraviesen puertas
+	local doorsFolder = workspace:FindFirstChild("Doors")
+	local filterList = {nodesRoot}
+	if doorsFolder then
+		table.insert(filterList, doorsFolder)
+	end
+	rayParams.FilterDescendantsInstances = filterList
 
 	local direction = toPos - fromPos
 	local result = workspace:Raycast(fromPos, direction, rayParams)
