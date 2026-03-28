@@ -9,6 +9,6 @@ return {
 
 	{
 		name = "Guard_2",
-		patrolRoute = { "Node_0_406", "Node_0_415" },
+		patrolRoute = { "Node_0_405", "Node_0_415" },
 	},
 }

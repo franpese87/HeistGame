@@ -109,6 +109,13 @@ end
 
 function VisionSensor:SetDebug(enabled)
 	self.debugEnabled = enabled
+
+	-- Limpiar visualizaciones cuando se desactiva el debug
+	if not enabled then
+		self:ClearRangeCircle()
+		self:ClearConeBoundaries()
+		self:ClearLineOfSight()
+	end
 end
 
 -- Obtiene la dirección de visión (usa la cabeza si está disponible)

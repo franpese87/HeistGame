@@ -128,10 +128,6 @@ function Controller.new(pawn, navigationGraph, config)
 		detection = loggingConfig.detection or false,
 	}
 
-	-- Debug visuals
-	local visualsConfig = DebugConfig.visuals or {}
-	self.showSmartObservation = visualsConfig.showSmartObservation or false
-
 	-- Observación (estado temporal)
 	self.originalCFrame = nil
 	self.currentObservationIndex = 1
@@ -354,26 +350,25 @@ function Controller:FindBestObservationOrientation()
 		-- Calcular métricas del grupo
 		local distances = {}
 		local totalDistance = 0
+		local maxDistance = 0
 		for _, ray in ipairs(group.rays) do
-			table.insert(distances, ray.freeDistance)
-			totalDistance = totalDistance + ray.freeDistance
+			local dist = ray.freeDistance
+			table.insert(distances, dist)
+			totalDistance = totalDistance + dist
+			if dist > maxDistance then
+				maxDistance = dist
+			end
 		end
 
 		-- Promedio de distancia
 		group.averageDistance = totalDistance / #distances
+		group.maxDistance = maxDistance
 
-		-- Desviación estándar (medida de homogeneidad)
-		local variance = 0
-		for _, distance in ipairs(distances) do
-			local diff = distance - group.averageDistance
-			variance = variance + (diff * diff)
-		end
-		group.standardDeviation = math.sqrt(variance / #distances)
-
-		-- Score: priorizar promedio alto y desviación baja (homogeneidad)
-		-- Usamos: score = averageDistance / (1 + standardDeviation)
-		-- Esto penaliza grupos con alta variabilidad
-		group.score = group.averageDistance / (1 + group.standardDeviation)
+		-- Score híbrido: priorizar grupos con al menos UNA salida libre (maxDistance)
+		-- pero mantener preferencia por promedio alto (área general abierta)
+		-- Esto resuelve el caso de pasillos estrechos donde queremos orientar hacia las salidas
+		-- en lugar de hacia las paredes laterales
+		group.score = (maxDistance * 0.7) + (group.averageDistance * 0.3)
 
 		table.insert(rayGroups, group)
 	end
@@ -905,10 +900,19 @@ function Controller:UpdateInvestigating()
 			self.investigationObservationTime = tick()
 			self.pawn:SetAutoRotate(false)
 
-			-- Smart Orientation: Encontrar la mejor orientación base para observar
-			self.originalCFrame = self:FindBestObservationOrientation()
+			-- Orientarse hacia la última posición conocida del target
+			-- En INVESTIGATING el NPC sabe dónde vio al jugador, así que es más natural
+			-- orientarse hacia esa posición en lugar de usar Smart Orientation
+			local currentPos = self.pawn:GetPosition()
+			local directionToTarget = (self.investigationTarget - currentPos) * Vector3.new(1, 0, 1)
 
-			-- Rotar suavemente hacia la mejor orientación
+			if directionToTarget.Magnitude > 0.1 then
+				self.originalCFrame = CFrame.lookAt(currentPos, currentPos + directionToTarget)
+			else
+				self.originalCFrame = self.pawn:GetCFrame()
+			end
+
+			-- Rotar suavemente hacia la última posición conocida
 			local rotationTweenInfo = TweenInfo.new(
 				0.4,  -- Duración: 0.4 segundos (natural y fluida)
 				Enum.EasingStyle.Sine,
@@ -981,6 +985,14 @@ end
 
 function Controller:UpdateReturning()
 	if not self.returnTargetNode or self:HasArrivedAt(self.returnTargetNode.Position) then
+		self:ChangeState(AIState.PATROLLING)
+		return
+	end
+
+	-- Si no hay path y estamos cerca del nodo, transicionar directamente
+	-- Esto evita quedar atrapado cuando start/end node son el mismo
+	local distanceToTarget = (self.pawn:GetPosition() - self.returnTargetNode.Position).Magnitude
+	if not self.currentPath and distanceToTarget < 10 then
 		self:ChangeState(AIState.PATROLLING)
 		return
 	end

@@ -462,34 +462,35 @@ end
 local activeLastSeenSpheres = {}
 
 --[[
-	DrawLastSeenPosition - Dibuja una esfera en la última posición detectada
+	DrawLastSeenPosition - Dibuja un cilindro a ras de suelo en la última posición detectada
 
-	La esfera hace fadeout progresivo durante toda su duración (coincide con investigationDuration).
-	Si se actualiza la posición, la esfera anterior desaparece rápidamente.
+	El cilindro hace fadeout progresivo durante toda su duración (coincide con investigationDuration).
+	Si se actualiza la posición, el cilindro anterior desaparece rápidamente.
+	Se muestra siempre a ras de suelo independientemente de la altura de la posición (jugador saltando, etc).
 
 	Parámetros:
-	- npcName: Nombre del NPC para identificar la esfera
-	- position: Vector3 posición donde dibujar
+	- npcName: Nombre del NPC para identificar el cilindro
+	- position: Vector3 posición donde dibujar (se proyecta al suelo)
 	- options:
 	    - duration: Tiempo total de vida (default: 15, igual que investigationDuration)
-	    - color: Color de la esfera (default: rojo)
-	    - size: Tamaño de la esfera (default: 2)
+	    - color: Color del cilindro (default: rojo)
+	    - size: Radio del cilindro (default: 3, ancho de humanoide R6)
 	    - startTransparency: Transparencia inicial (default: 0.3)
 ]]
 function Visualizer.DrawLastSeenPosition(npcName, position, options)
 	options = options or {}
 	local duration = options.duration or 15
 	local color = options.color or Color3.fromRGB(255, 100, 100)
-	local size = options.size or 2
+	local size = options.size or 3  -- Radio de 3 studs (ancho de humanoide R6)
 	local startTransparency = options.startTransparency or 0.3
 	local quickFadeDuration = 0.4
 
 	if not position then return end
 
-	-- Fade out rápido de la esfera anterior si existe
+	-- Fade out rápido del cilindro anterior si existe
 	local existingData = activeLastSeenSpheres[npcName]
 	if existingData and existingData.sphere and existingData.sphere.Parent then
-		local oldSphere = existingData.sphere
+		local oldCylinder = existingData.sphere
 		local oldLabel = existingData.label
 
 		-- Cancelar el tween anterior
@@ -502,7 +503,7 @@ function Visualizer.DrawLastSeenPosition(npcName, position, options)
 
 		-- Fade out rápido
 		local quickTweenInfo = TweenInfo.new(quickFadeDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-		local quickTween = TweenService:Create(oldSphere, quickTweenInfo, { Transparency = 1 })
+		local quickTween = TweenService:Create(oldCylinder, quickTweenInfo, { Transparency = 1 })
 		quickTween:Play()
 
 		if oldLabel and oldLabel.Parent then
@@ -513,26 +514,29 @@ function Visualizer.DrawLastSeenPosition(npcName, position, options)
 			quickLabelTween:Play()
 		end
 
-		Debris:AddItem(oldSphere, quickFadeDuration + 0.1)
+		Debris:AddItem(oldCylinder, quickFadeDuration + 0.1)
 	end
 
-	-- Crear nueva esfera
-	local sphere = Instance.new("Part")
-	sphere.Name = "DEBUG_LastSeen_" .. npcName
-	sphere.Shape = Enum.PartType.Ball
-	sphere.Size = Vector3.new(size, size, size)
-	sphere.Position = position
-	sphere.Anchored = true
-	sphere.CanCollide = false
-	sphere.CanQuery = false
-	sphere.Color = color
-	sphere.Transparency = startTransparency
-	sphere.Material = Enum.Material.Neon
-	sphere.Parent = workspace
+	-- Crear nuevo cilindro a ras de suelo (como el rango de visión)
+	local cylinder = Instance.new("Part")
+	cylinder.Name = "DEBUG_LastSeen_" .. npcName
+	cylinder.Shape = Enum.PartType.Cylinder
+	cylinder.Size = Vector3.new(0.3, size * 2, size * 2)  -- altura, diámetro, diámetro
+	cylinder.Anchored = true
+	cylinder.CanCollide = false
+	cylinder.CanQuery = false
+	cylinder.Color = color
+	cylinder.Transparency = startTransparency
+	cylinder.Material = Enum.Material.Neon
+
+	-- Posicionar a ras de suelo
+	local groundY = position.Y - 2.5  -- Aproximado a ras de suelo
+	cylinder.CFrame = CFrame.new(position.X, groundY, position.Z) * CFrame.Angles(0, 0, math.rad(90))
+	cylinder.Parent = workspace
 
 	-- Etiqueta
 	local labelTween = nil
-	local label = CreateBillboardLabel(sphere, "Last Seen", {
+	local label = CreateBillboardLabel(cylinder, "Last Seen", {
 		size = UDim2.fromOffset(80, 25),
 		offset = Vector3.new(0, size / 2 + 0.5, 0),
 		textSize = 12,
@@ -543,8 +547,8 @@ function Visualizer.DrawLastSeenPosition(npcName, position, options)
 	-- Fadeout progresivo durante toda la duración
 	local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 
-	local sphereTween = TweenService:Create(sphere, tweenInfo, { Transparency = 1 })
-	sphereTween:Play()
+	local cylinderTween = TweenService:Create(cylinder, tweenInfo, { Transparency = 1 })
+	cylinderTween:Play()
 
 	labelTween = TweenService:Create(label, tweenInfo, {
 		TextTransparency = 1,
@@ -554,23 +558,23 @@ function Visualizer.DrawLastSeenPosition(npcName, position, options)
 
 	-- Guardar referencia con datos del tween
 	activeLastSeenSpheres[npcName] = {
-		sphere = sphere,
+		sphere = cylinder,
 		label = label,
-		tween = sphereTween,
+		tween = cylinderTween,
 		labelTween = labelTween,
 	}
 
 	-- Destruir y limpiar después de la duración
 	task.delay(duration + 0.1, function()
-		if activeLastSeenSpheres[npcName] and activeLastSeenSpheres[npcName].sphere == sphere then
-			if sphere and sphere.Parent then
-				sphere:Destroy()
+		if activeLastSeenSpheres[npcName] and activeLastSeenSpheres[npcName].sphere == cylinder then
+			if cylinder and cylinder.Parent then
+				cylinder:Destroy()
 			end
 			activeLastSeenSpheres[npcName] = nil
 		end
 	end)
 
-	return sphere
+	return cylinder
 end
 
 function Visualizer.ClearLastSeenPosition(npcName)
