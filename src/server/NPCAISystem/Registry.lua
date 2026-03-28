@@ -57,7 +57,7 @@ function Registry:RegisterNPC(pawn, controller)
 		id = id,
 		pawn = pawn,
 		controller = controller,
-		registeredAt = tick()
+		registeredAt = os.clock()
 	}
 
 	-- Guardar referencia del ID en el controller para búsquedas inversas
@@ -199,7 +199,7 @@ function Registry:Start()
 
 	task.spawn(function()
 		while self.isRunning do
-			local startTime = tick()
+			local startTime = os.clock()
 
 			for _, npcData in pairs(self.npcs) do
 				if npcData.controller.isActive then
@@ -214,7 +214,7 @@ function Registry:Start()
 				end
 			end
 
-			local elapsed = tick() - startTime
+			local elapsed = os.clock() - startTime
 			local sleepTime = math.max(0, self.updateRate - elapsed)
 			task.wait(sleepTime)
 		end

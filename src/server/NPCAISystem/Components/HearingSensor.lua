@@ -38,7 +38,7 @@ function HearingSensor:OnGlobalNoise(position, range)
 	if distance <= effectiveRange then
 		self.lastNoise = {
 			position = position,
-			time = tick(),
+			time = os.clock(),
 			priority = 1
 		}
 	end
@@ -49,7 +49,7 @@ function HearingSensor:CheckForNoise()
 	if not self.lastNoise then return nil end
 
 	-- Verificar si el recuerdo es muy viejo
-	if tick() - self.lastNoise.time > self.memoryDuration then
+	if os.clock() - self.lastNoise.time > self.memoryDuration then
 		self.lastNoise = nil
 		return nil
 	end

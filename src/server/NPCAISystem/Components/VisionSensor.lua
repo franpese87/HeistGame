@@ -144,7 +144,7 @@ end
 ]]
 
 function VisionSensor:Scan()
-	local currentTime = tick()
+	local currentTime = os.clock()
 
 	-- FASE 1: Encontrar el jugador más cercano dentro del rango
 	local closestCharacter = nil

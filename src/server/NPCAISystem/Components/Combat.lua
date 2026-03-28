@@ -31,7 +31,7 @@ function Combat:CanAttack(target)
 	if not target then return false end
 
 	-- Check cooldown
-	if tick() - self.lastAttackTime < self.attackCooldown then
+	if os.clock() - self.lastAttackTime < self.attackCooldown then
 		return false
 	end
 
@@ -53,7 +53,7 @@ function Combat:TryAttack(target)
 	local targetHumanoid = target:FindFirstChildOfClass("Humanoid")
 	if targetHumanoid and targetHumanoid.Health > 0 then
 		targetHumanoid:TakeDamage(self.attackDamage)
-		self.lastAttackTime = tick()
+		self.lastAttackTime = os.clock()
 		return true
 	end
 

@@ -108,7 +108,7 @@ function Controller.new(pawn, navigationGraph, config)
 	-- Estado general
 	self.currentState = AIState.PATROLLING
 	self.isActive = true
-	self.stateStartTime = tick()
+	self.stateStartTime = os.clock()
 
 	-- Target tracking
 	self.target = nil
@@ -431,7 +431,7 @@ end
 
 function Controller:EnterObserving()
 	self.currentObservationIndex = 1
-	self.observationStartTime = tick()
+	self.observationStartTime = os.clock()
 
 	self.pawn:StopMovement()
 	self.pawn:SetAutoRotate(false)
@@ -465,7 +465,7 @@ function Controller:EnterObserving()
 end
 
 function Controller:UpdateObserving()
-	local currentTime = tick()
+	local currentTime = os.clock()
 	if currentTime - self.observationStartTime >= self.observationTimePerAngle then
 		self.currentObservationIndex = self.currentObservationIndex + 1
 		if self.currentObservationIndex > #self.validObservationAngles then
@@ -572,7 +572,7 @@ function Controller:ClearAlertIndicator()
 end
 
 function Controller:EnterAlerted()
-	self.alertedStartTime = tick()
+	self.alertedStartTime = os.clock()
 	self.pawn:StopMovement()
 	self.pawn:SetAutoRotate(false)
 	self.pawn:PlayAnimation("idle")
@@ -618,7 +618,7 @@ function Controller:EnterAlerted()
 end
 
 function Controller:UpdateAlerted()
-	local elapsed = tick() - self.alertedStartTime
+	local elapsed = os.clock() - self.alertedStartTime
 	local events = self.lastVisionEvents
 
 	-- Actualizar lastSeenPosition mientras lo vemos (usando resultado cacheado de UpdateSenses)
@@ -739,7 +739,7 @@ end
 
 function Controller:ChaseUsingGraph(targetRoot)
 	local targetPosition = targetRoot.Position
-	local currentTime = tick()
+	local currentTime = os.clock()
 
 	if not self.currentPath or #self.currentPath == 0 then
 		self:CalculateGraphPathToPosition(targetPosition)
@@ -787,7 +787,7 @@ function Controller:CalculateGraphPathToPosition(targetPosition)
 		end
 
 		self.currentPath = path
-		self.timeStartedMovingToNode = tick()
+		self.timeStartedMovingToNode = os.clock()
 
 		local firstNode = path[1]
 		local distToFirst = (npcPos - firstNode.position).Magnitude
@@ -813,7 +813,7 @@ function Controller:FollowCurrentPath()
 		return
 	end
 
-	if tick() - self.timeStartedMovingToNode > self.nodeTimeout then
+	if os.clock() - self.timeStartedMovingToNode > self.nodeTimeout then
 		self.currentPath = nil
 		return
 	end
@@ -823,7 +823,7 @@ function Controller:FollowCurrentPath()
 
 	if self:HasArrivedAt(targetNode.position) then
 		self.currentPathIndex = self.currentPathIndex + 1
-		self.timeStartedMovingToNode = tick()
+		self.timeStartedMovingToNode = os.clock()
 		if self.currentPathIndex > #self.currentPath then
 			self.currentPath = nil
 		end
@@ -871,7 +871,7 @@ end
 -- ==============================================================================
 
 function Controller:EnterInvestigating()
-	self.investigationStartTime = tick()
+	self.investigationStartTime = os.clock()
 	self.investigationObservationIndex = 1
 	self.investigationObservationTime = 0
 	self.investigationIsObserving = false
@@ -895,7 +895,7 @@ function Controller:EnterInvestigating()
 end
 
 function Controller:UpdateInvestigating()
-	if tick() - self.investigationStartTime > self.investigationDuration then
+	if os.clock() - self.investigationStartTime > self.investigationDuration then
 		self:ChangeState(AIState.RETURNING)
 		return
 	end
@@ -912,7 +912,7 @@ function Controller:UpdateInvestigating()
 		-- Iniciar observación si aún no empezó
 		if not self.investigationIsObserving then
 			self.investigationIsObserving = true
-			self.investigationObservationTime = tick()
+			self.investigationObservationTime = os.clock()
 			self.pawn:SetAutoRotate(false)
 
 			-- Orientarse hacia la última posición conocida del target
@@ -953,7 +953,7 @@ function Controller:UpdateInvestigating()
 		end
 
 		-- Rotar por los ángulos de observación
-		local currentTime = tick()
+		local currentTime = os.clock()
 		if currentTime - self.investigationObservationTime >= self.observationTimePerAngle then
 			self.investigationObservationIndex = self.investigationObservationIndex + 1
 			if self.investigationObservationIndex > #self.validInvestigationAngles then
@@ -1061,7 +1061,7 @@ function Controller:ChangeState(newState)
 
 	local oldState = self.currentState
 	self.currentState = newState
-	self.stateStartTime = tick()
+	self.stateStartTime = os.clock()
 	self:Log("stateChanges", oldState .. " → " .. newState)
 
 	self.pawn:UpdateStateIndicator(newState)
