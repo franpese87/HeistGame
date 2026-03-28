@@ -1,4 +1,5 @@
 local NPCAISystem = require(script.NPCAISystem)
+local DoorService = require(script.Services.DoorService)
 local DebugConfig = require(script.Config.DebugConfig)
 local NPCBaseConfig = require(script.Config.NPCBaseConfig)
 local NPCSpawnList = require(script.Config.NPCSpawnList)
@@ -7,6 +8,12 @@ local RunService = game:GetService("RunService")
 local isStudio = RunService:IsStudio()
 
 print("🎮 Iniciando sistema de NPCs...")
+
+-- ==============================================================================
+-- 0. INICIALIZAR SERVICIOS
+-- ==============================================================================
+
+DoorService.Init()
 
 -- ==============================================================================
 -- 1. CREAR GRAFO DE NAVEGACIÓN
