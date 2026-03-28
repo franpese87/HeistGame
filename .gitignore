@@ -20,6 +20,7 @@ package-lock.json
 
 # Claude Code
 .claude/
+tmpclaude-*
 
 # macOS
 .DS_Store

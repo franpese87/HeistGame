@@ -728,6 +728,120 @@ function NavigationGraph:GetNearestNodeTowardsTarget(npcPosition, targetPosition
 end
 
 -- ==============================================================================
+-- MIN-HEAP (Binary Heap para A* open set)
+-- ==============================================================================
+-- Extrae el nodo con menor fScore en O(log n) en lugar de O(n log n) con sort.
+-- Estructura: array donde heap[1] siempre es el mínimo.
+-- Hijo izquierdo de i = 2i, hijo derecho = 2i+1, padre de i = floor(i/2).
+
+local MinHeap = {}
+MinHeap.__index = MinHeap
+
+function MinHeap.new()
+	return setmetatable({
+		data = {},      -- Array de nodos
+		index = {},     -- nodeName → posición en data (para decrease-key O(log n))
+		size = 0,
+	}, MinHeap)
+end
+
+function MinHeap:Insert(node, priority)
+	self.size = self.size + 1
+	self.data[self.size] = {node = node, priority = priority}
+	self.index[node.name] = self.size
+	self:_siftUp(self.size)
+end
+
+function MinHeap:Pop()
+	if self.size == 0 then return nil end
+
+	local top = self.data[1]
+	self.index[top.node.name] = nil
+
+	if self.size == 1 then
+		self.data[1] = nil
+		self.size = 0
+		return top.node
+	end
+
+	self.data[1] = self.data[self.size]
+	self.data[self.size] = nil
+	self.size = self.size - 1
+	self.index[self.data[1].node.name] = 1
+	self:_siftDown(1)
+
+	return top.node
+end
+
+function MinHeap:DecreasePriority(nodeName, newPriority)
+	local pos = self.index[nodeName]
+	if not pos then return end
+	self.data[pos].priority = newPriority
+	self:_siftUp(pos)
+end
+
+function MinHeap:Contains(nodeName)
+	return self.index[nodeName] ~= nil
+end
+
+function MinHeap:IsEmpty()
+	return self.size == 0
+end
+
+function MinHeap:_siftUp(pos)
+	local data = self.data
+	local index = self.index
+	local entry = data[pos]
+
+	while pos > 1 do
+		local parentPos = math.floor(pos / 2)
+		local parent = data[parentPos]
+
+		if entry.priority >= parent.priority then
+			break
+		end
+
+		data[pos] = parent
+		index[parent.node.name] = pos
+		pos = parentPos
+	end
+
+	data[pos] = entry
+	index[entry.node.name] = pos
+end
+
+function MinHeap:_siftDown(pos)
+	local data = self.data
+	local index = self.index
+	local size = self.size
+	local entry = data[pos]
+
+	while true do
+		local left = pos * 2
+		local right = left + 1
+		local smallest = pos
+
+		if left <= size and data[left].priority < data[smallest].priority then
+			smallest = left
+		end
+		if right <= size and data[right].priority < data[smallest].priority then
+			smallest = right
+		end
+
+		if smallest == pos then
+			break
+		end
+
+		data[pos] = data[smallest]
+		index[data[pos].node.name] = pos
+		pos = smallest
+	end
+
+	data[pos] = entry
+	index[entry.node.name] = pos
+end
+
+-- ==============================================================================
 -- PATHFINDING (A*)
 -- ==============================================================================
 
@@ -741,29 +855,25 @@ function NavigationGraph:GetPathBetweenNodes(startNode, endNode)
 		return {endNode}
 	end
 
-	-- Usar diccionarios para búsquedas O(1) en lugar de table.find() O(n)
-	local openSet = {startNode}
-	local openSetLookup = {[startNode.name] = true}  -- Para búsqueda rápida
+	local openSet = MinHeap.new()
 	local closedSet = {}  -- Diccionario: closedSet[nodeName] = true
 	local cameFrom = {}
 	local gScore = {[startNode.name] = 0}
-	local fScore = {[startNode.name] = (startNode.position - endNode.position).Magnitude}
+
+	local startF = (startNode.position - endNode.position).Magnitude
+	openSet:Insert(startNode, startF)
+
 	local iterations = 0
 	local maxIterations = 500
 
-	while #openSet > 0 do
+	while not openSet:IsEmpty() do
 		iterations = iterations + 1
 		if iterations > maxIterations then
 			self:Log("astar", "A* TIMEOUT: " .. startNode.name .. " → " .. endNode.name .. " (>" .. maxIterations .. " iteraciones)")
 			return nil
 		end
 
-		table.sort(openSet, function(a, b)
-			return (fScore[a.name] or math.huge) < (fScore[b.name] or math.huge)
-		end)
-
-		local current = table.remove(openSet, 1)
-		openSetLookup[current.name] = nil
+		local current = openSet:Pop()
 
 		if current.name == endNode.name then
 			local path = {current}
@@ -783,16 +893,17 @@ function NavigationGraph:GetPathBetweenNodes(startNode, endNode)
 			if neighbor and not closedSet[neighborName] then
 				local tentative_gScore = gScore[current.name] + (current.position - neighbor.position).Magnitude
 
-				if not openSetLookup[neighborName] then
-					table.insert(openSet, neighbor)
-					openSetLookup[neighborName] = true
-				elseif tentative_gScore >= (gScore[neighborName] or math.huge) then
-					continue
+				if not openSet:Contains(neighborName) then
+					gScore[neighborName] = tentative_gScore
+					local f = tentative_gScore + (neighbor.position - endNode.position).Magnitude
+					openSet:Insert(neighbor, f)
+					cameFrom[neighborName] = current
+				elseif tentative_gScore < (gScore[neighborName] or math.huge) then
+					gScore[neighborName] = tentative_gScore
+					local f = tentative_gScore + (neighbor.position - endNode.position).Magnitude
+					openSet:DecreasePriority(neighborName, f)
+					cameFrom[neighborName] = current
 				end
-
-				cameFrom[neighborName] = current
-				gScore[neighborName] = tentative_gScore
-				fScore[neighborName] = gScore[neighborName] + (neighbor.position - endNode.position).Magnitude
 			end
 		end
 	end
