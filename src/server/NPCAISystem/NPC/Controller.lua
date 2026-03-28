@@ -109,6 +109,7 @@ function Controller.new(pawn, navigationGraph, config)
 	self.target = nil
 	self.lastSeenPosition = nil
 	self.lastVisionEvents = nil
+	self.senseFrameCounter = 0
 	self.lastMoveCommand = 0
 	self.timeStartedMovingToNode = 0
 
@@ -188,13 +189,24 @@ end
 -- MAIN UPDATE LOOP
 -- ==============================================================================
 
+-- Estados que requieren sensores a máxima frecuencia (cada frame)
+local HIGH_PRIORITY_STATES = {
+	[AIState.CHASING] = true,
+	[AIState.ATTACKING] = true,
+	[AIState.ALERTED] = true,
+}
+
 function Controller:Update(_deltaTime)
 	if not self.isActive or not self.pawn:IsAlive() then
 		self.isActive = false
 		return
 	end
 
-	self:UpdateSenses()
+	-- Throttle sensores: cada frame en combate, cada 2 frames en estados pasivos
+	self.senseFrameCounter = self.senseFrameCounter + 1
+	if HIGH_PRIORITY_STATES[self.currentState] or self.senseFrameCounter % 2 == 0 then
+		self:UpdateSenses()
+	end
 
 	if self.currentState == AIState.PATROLLING then
 		self:UpdatePatrolling()
