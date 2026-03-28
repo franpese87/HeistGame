@@ -95,6 +95,13 @@ function VisionSensor.new(npc, config)
 	self.confirmedTarget = nil
 	self.lastSeenPosition = nil
 
+	-- Tabla de eventos reutilizable (evita allocación por frame)
+	self.events = {
+		TargetSpotted = false,
+		TargetVisible = false,
+		TargetLost = false,
+	}
+
 	-- Debug
 	self.debugEnabled = false
 	self.debugInstances = {
@@ -247,11 +254,10 @@ end
 -- ==============================================================================
 
 function VisionSensor:ProcessDetectionLogic(visibleTarget, currentTime)
-	local events = {
-		TargetSpotted = false,   -- Primera vez que ve este target (dispara ALERTED)
-		TargetVisible = false,   -- Target actualmente visible
-		TargetLost = false,      -- Target perdido definitivamente
-	}
+	local events = self.events
+	events.TargetSpotted = false
+	events.TargetVisible = false
+	events.TargetLost = false
 
 	if visibleTarget then
 		events.TargetVisible = true
