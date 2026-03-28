@@ -15,6 +15,7 @@ local TweenService = game:GetService("TweenService")
 local VisionSensor = require(script.Parent.Parent.Components.VisionSensor)
 local Combat = require(script.Parent.Parent.Components.Combat)
 local HearingSensor = require(script.Parent.Parent.Components.HearingSensor)
+local GeometryVersion = require(script.Parent.Parent.Parent.Services.GeometryVersion)
 local DebugConfig = require(script.Parent.Parent.Parent.Config.DebugConfig)
 local Visualizer = require(script.Parent.Parent.Debug.Visualizer)
 
@@ -122,6 +123,10 @@ function Controller.new(pawn, navigationGraph, config)
 	self.patrolNodes = config.patrolNodes or {}
 	self.currentPatrolIndex = 1
 	self.isWaiting = false
+
+	-- Cache de orientaciones por nodo de patrulla (invalidado por GeometryVersion)
+	-- { [nodeIndex] = { orientation = CFrame, validAngles = {}, geometryVersion = number } }
+	self.observationCache = {}
 
 	-- Pathfinding/Persecución
 	self.currentPath = nil
@@ -437,29 +442,44 @@ function Controller:EnterObserving()
 	self.pawn:SetAutoRotate(false)
 	self.pawn:PlayAnimation("idle")
 
-	-- Smart Orientation: Encontrar la mejor orientación base para observar
-	self.originalCFrame = self:FindBestObservationOrientation()
+	-- Intentar usar cache de orientación para este nodo de patrulla
+	local nodeIndex = self.currentPatrolIndex
+	local currentGeoVersion = GeometryVersion.Get()
+	local cached = self.observationCache[nodeIndex]
 
-	-- Rotar suavemente hacia la mejor orientación (similar a movimiento de patrullaje)
+	if cached and cached.geometryVersion == currentGeoVersion then
+		-- Cache válido: reutilizar orientación y ángulos (0 raycasts)
+		self.originalCFrame = cached.orientation
+		self.validObservationAngles = cached.validAngles
+	else
+		-- Cache inválido o inexistente: calcular y guardar
+		self.originalCFrame = self:FindBestObservationOrientation()
+
+		local validAngles = {}
+		for _, angle in ipairs(self.observationAngles) do
+			if self:IsObservationAngleValid(angle) then
+				table.insert(validAngles, angle)
+			end
+		end
+		if #validAngles == 0 then
+			validAngles = {0}
+		end
+
+		self.validObservationAngles = validAngles
+		self.observationCache[nodeIndex] = {
+			orientation = self.originalCFrame,
+			validAngles = validAngles,
+			geometryVersion = currentGeoVersion,
+		}
+	end
+
+	-- Rotar suavemente hacia la orientación
 	local rotationTweenInfo = TweenInfo.new(
 		0.4,  -- Duración: 0.4 segundos (natural y fluida)
 		Enum.EasingStyle.Sine,
 		Enum.EasingDirection.InOut
 	)
 	self.pawn:RotateWithTween(self.originalCFrame, rotationTweenInfo)
-
-	-- Filtrar ángulos válidos (no bloqueados por paredes)
-	self.validObservationAngles = {}
-	for _, angle in ipairs(self.observationAngles) do
-		if self:IsObservationAngleValid(angle) then
-			table.insert(self.validObservationAngles, angle)
-		end
-	end
-
-	-- Si todos los ángulos están bloqueados, usar solo el centro (0°)
-	if #self.validObservationAngles == 0 then
-		self.validObservationAngles = {0}
-	end
 
 	self:RotateToObservationAngle(self.validObservationAngles[1])
 end
