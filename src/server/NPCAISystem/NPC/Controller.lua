@@ -49,6 +49,11 @@ function Controller.new(pawn, navigationGraph, config)
 	config = config or {}
 	self.patrolWaitTime = config.patrolWaitTime or 2
 
+	-- RaycastParams reutilizable (observación, validación de ángulos)
+	self.raycastParams = RaycastParams.new()
+	self.raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	self.raycastParams.FilterDescendantsInstances = {pawn:GetInstance()}
+
 	-- Navegación (siempre grafo, excepto acercamiento final para atacar)
 	self.directApproachDistance = config.directApproachDistance or 8
 	self.nodeTimeout = 4
@@ -321,11 +326,7 @@ function Controller:FindBestObservationOrientation()
 		local direction = CFrame.Angles(0, math.rad(angle), 0).LookVector
 		local rayDirection = direction * scanDistance
 
-		local raycastParams = RaycastParams.new()
-		raycastParams.FilterDescendantsInstances = {self.pawn:GetInstance()}
-		raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-
-		local result = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+		local result = workspace:Raycast(rayOrigin, rayDirection, self.raycastParams)
 
 		-- Calcular distancia libre (hasta colisión o máxima)
 		local freeDistance = result and result.Distance or scanDistance
@@ -420,11 +421,7 @@ function Controller:IsObservationAngleValid(angle)
 	local rayOrigin = currentPos + Vector3.new(0, visionHeight, 0)
 	local rayDirection = direction * self.observationValidationDistance
 
-	local raycastParams = RaycastParams.new()
-	raycastParams.FilterDescendantsInstances = {self.pawn:GetInstance()}
-	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-
-	local result = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+	local result = workspace:Raycast(rayOrigin, rayDirection, self.raycastParams)
 
 	-- Si no hay obstáculo o está lo suficientemente lejos, el ángulo es válido
 	return result == nil or result.Distance >= self.observationValidationDistance
