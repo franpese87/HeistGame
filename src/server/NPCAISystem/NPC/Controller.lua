@@ -127,6 +127,8 @@ function Controller.new(pawn, navigationGraph, config)
 	self.currentPath = nil
 	self.currentPathIndex = 1
 	self.targetLastPosition = nil
+	self.pathRecalcInterval = config.pathRecalcInterval or 1.5
+	self.lastPathCalcTime = 0
 
 	-- Debug logging
 	local loggingConfig = config.logging or DebugConfig.logging or {}
@@ -737,22 +739,24 @@ end
 
 function Controller:ChaseUsingGraph(targetRoot)
 	local targetPosition = targetRoot.Position
+	local currentTime = tick()
 
 	if not self.currentPath or #self.currentPath == 0 then
 		self:CalculateGraphPathToPosition(targetPosition)
 		self.targetLastPosition = targetPosition
+		self.lastPathCalcTime = currentTime
 		return
 	end
 
-	local currentTargetNode = self.currentPath[self.currentPathIndex]
+	-- Recalcular si el target se movió significativamente Y (llegamos a un nodo O expiró el timer)
+	local targetMoved = self.targetLastPosition and (targetPosition - self.targetLastPosition).Magnitude > 10
+	local timerExpired = (currentTime - self.lastPathCalcTime) >= self.pathRecalcInterval
+	local arrivedAtNode = self.currentPath[self.currentPathIndex] and self:HasArrivedAt(self.currentPath[self.currentPathIndex].position)
 
-	if currentTargetNode and self:HasArrivedAt(currentTargetNode.position) then
-		local targetMoved = self.targetLastPosition and (targetPosition - self.targetLastPosition).Magnitude > 10
-
-		if targetMoved then
-			self:CalculateGraphPathToPosition(targetPosition)
-			self.targetLastPosition = targetPosition
-		end
+	if targetMoved and (arrivedAtNode or timerExpired) then
+		self:CalculateGraphPathToPosition(targetPosition)
+		self.targetLastPosition = targetPosition
+		self.lastPathCalcTime = currentTime
 	end
 
 	self:FollowCurrentPath()
