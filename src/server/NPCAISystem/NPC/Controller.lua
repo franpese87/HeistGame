@@ -108,6 +108,7 @@ function Controller.new(pawn, navigationGraph, config)
 	-- Target tracking
 	self.target = nil
 	self.lastSeenPosition = nil
+	self.lastVisionEvents = nil
 	self.lastMoveCommand = 0
 	self.timeStartedMovingToNode = 0
 
@@ -219,6 +220,7 @@ end
 function Controller:UpdateSenses()
 	-- 1. VISIÓN
 	local currentTarget, lastPos, events = self.visionSensor:Scan()
+	self.lastVisionEvents = events
 
 	if currentTarget then
 		self.target = currentTarget
@@ -606,10 +608,10 @@ end
 
 function Controller:UpdateAlerted()
 	local elapsed = tick() - self.alertedStartTime
+	local events = self.lastVisionEvents
 
-	-- Actualizar lastSeenPosition mientras lo vemos
-	local _, _, events = self.visionSensor:Scan()
-	if events.TargetVisible and self.target then
+	-- Actualizar lastSeenPosition mientras lo vemos (usando resultado cacheado de UpdateSenses)
+	if events and events.TargetVisible and self.target then
 		local targetRoot = self.target:FindFirstChild("HumanoidRootPart")
 		if targetRoot then
 			self.lastSeenPosition = targetRoot.Position
@@ -618,7 +620,7 @@ function Controller:UpdateAlerted()
 
 	-- Tiempo de reacción completado → decidir siguiente estado
 	if elapsed >= self.reactionTime then
-		if events.TargetVisible then
+		if events and events.TargetVisible then
 			self:ChangeState(AIState.CHASING)
 		else
 			self:ChangeState(AIState.INVESTIGATING)
