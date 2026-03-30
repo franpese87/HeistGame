@@ -20,6 +20,7 @@ local isStudio = RunService:IsStudio()
 
 local NPCAISystem   = require(script.NPCAISystem)
 local DoorService   = require(script.Services.DoorService)
+local NoiseService  = require(script.Services.NoiseService)
 local DebugConfig   = require(script.Config.DebugConfig)
 local NPCBaseConfig = require(script.Config.NPCBaseConfig)
 local NPCSpawnList  = require(script.Config.NPCSpawnList)
@@ -164,12 +165,24 @@ events.RequestInteract.OnServerEvent:Connect(function(
 end)
 
 events.UpdateStealthState.OnServerEvent:Connect(function(
-	_player: Player,
-	_isCrouching: boolean,
+	player: Player,
+	isCrouching: boolean,
 	_isDisguised: boolean,
 	_inShadow: boolean
 )
-	-- Reservado: modulará la alerta de guardias en iteraciones futuras.
+	local char = player.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local humanoid = char and char:FindFirstChildOfClass("Humanoid") :: Humanoid?
+	if root and humanoid then
+		-- Scale noise range: crouching walk generates ~8 studs range, full sprint ~20
+		local speedRatio = math.clamp(humanoid.WalkSpeed / 16, 0, 1)
+		local noiseRange = isCrouching
+			and (speedRatio * 8)
+			or  (8 + speedRatio * 12)
+		if noiseRange > 1 then
+			NoiseService.MakeNoise(root.Position, noiseRange)
+		end
+	end
 end)
 
 -- ==============================================================================

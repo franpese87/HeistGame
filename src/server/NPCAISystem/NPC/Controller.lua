@@ -10,6 +10,7 @@
 	Usa el Pawn para interactuar con el mundo físico.
 ]]
 
+local Players    = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 
 local VisionSensor = require(script.Parent.Parent.Components.VisionSensor)
@@ -19,6 +20,7 @@ local GeometryVersion = require(script.Parent.Parent.Parent.Services.GeometryVer
 local DoorService = require(script.Parent.Parent.Parent.Services.DoorService)
 local DebugConfig = require(script.Parent.Parent.Parent.Config.DebugConfig)
 local Visualizer = require(script.Parent.Parent.Debug.Visualizer)
+local AlarmManager = require(script.Parent.Parent.Parent.Parent.AlarmManager)
 
 local AIState = {
 	PATROLLING = "Patrolling",
@@ -1144,6 +1146,12 @@ function Controller:ChangeState(newState)
 	elseif newState == AIState.CHASING then
 		self:ClearPath()
 		self.targetLastPosition = nil
+		if self.target then
+			local player = Players:GetPlayerFromCharacter(self.target)
+			if player then
+				AlarmManager.onNPCDetectedPlayer("guard", player)
+			end
+		end
 	elseif newState == AIState.ATTACKING then
 		-- Desactivar AutoRotate para control manual de rotación
 		self.pawn:SetAutoRotate(false)

@@ -25,6 +25,7 @@ return {
 	-- Velocidades
 	patrolSpeed = 8,
 	chaseSpeed = 8,               -- [DIFICULTAD] Velocidad de persecución (studs/s)
+	alertedChaseSpeed = 14,       -- Velocidad de persecución en fase Alarmed
 
 	-- Sistema de cono de visión
 	observationConeAngle = 90,    -- [DIFICULTAD] Ángulo del cono de visión (grados)
