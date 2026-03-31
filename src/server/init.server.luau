@@ -104,9 +104,13 @@ local events = {
 
 local Server = script.Parent
 
+local GameSession        = require(Server.GameSession)
 local AlarmManager       = require(Server.AlarmManager)
 local MissionManager     = require(Server.MissionManager)
 local SafeCrackingServer = require(Server.SafeCrackingServer)
+
+-- GameSession MUST init first: wires PlayerAdded/PlayerRemoving for all modules.
+GameSession.init()
 
 -- Puente NPC→AlarmManager: Controller.lua debe crear este BindableEvent y
 -- dispararlo cuando transite a CHASING. Mientras tanto funciona sin él.
