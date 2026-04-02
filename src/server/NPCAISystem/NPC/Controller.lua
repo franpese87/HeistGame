@@ -27,7 +27,8 @@ local AIState = {
 	CHASING = "Chasing",
 	ATTACKING = "Attacking",
 	INVESTIGATING = "Investigating",
-	RETURNING = "Returning"
+	RETURNING = "Returning",
+	STUNNED = "Stunned",
 }
 
 -- Constantes
@@ -95,6 +96,9 @@ function Controller.new(pawn, navigationGraph, config)
 
 	-- Investigación (duración = tiempo total de observación en un nodo de patrulla)
 	self.investigationDuration = #self.observationAngles * self.observationTimePerAngle
+
+	-- Stun (portazo)
+	self.stunDuration = config.stunDuration or 3
 
 	-- Componentes (Sensores y Combate)
 	local npcInstance = pawn:GetInstance()
@@ -216,6 +220,12 @@ local HIGH_PRIORITY_STATES = {
 function Controller:Update(_deltaTime)
 	if not self.isActive or not self.pawn:IsAlive() then
 		self.isActive = false
+		return
+	end
+
+	-- Stunned: no procesar sensores ni lógica de estados (inconsciente)
+	if self.currentState == AIState.STUNNED then
+		self:UpdateStunned()
 		return
 	end
 
@@ -862,7 +872,7 @@ function Controller:FollowCurrentPath()
 		self.pawn:StopMovement()
 		self.pawn:PlayAnimation("idle")
 		self.waitingForDoor = doorInPath
-		DoorService.Open(doorInPath, self.pawn:GetPosition())
+		DoorService.Open(doorInPath, self.pawn:GetPosition(), self.pawn:GetInstance())
 		return
 	end
 
@@ -1098,6 +1108,51 @@ function Controller:GetNearestPatrolNode()
 end
 
 -- ==============================================================================
+-- STUNNED (Portazo - aturdimiento por puerta)
+-- ==============================================================================
+
+function Controller:ApplyStun()
+	self:ChangeState(AIState.STUNNED)
+end
+
+function Controller:EnterStunned()
+	self.stunStartTime = os.clock()
+	self.pawn:StopMovement()
+	self.pawn:SetAutoRotate(false)
+	self.pawn:PlayAnimation("idle")
+
+	-- Inmovilizar sin desactivar física (WalkSpeed=0 mantiene colisión con suelo)
+	local humanoid = self.pawn:GetHumanoid()
+	if humanoid then
+		self.savedWalkSpeed = humanoid.WalkSpeed
+		self.savedJumpPower = humanoid.JumpPower
+		humanoid.WalkSpeed = 0
+		humanoid.JumpPower = 0
+	end
+
+	self.target = nil
+	self.lastSeenPosition = nil
+	self:ClearPath()
+end
+
+function Controller:UpdateStunned()
+	if os.clock() - self.stunStartTime >= self.stunDuration then
+		self:ChangeState(AIState.RETURNING)
+	end
+end
+
+function Controller:ExitStunned()
+	local humanoid = self.pawn:GetHumanoid()
+	if humanoid then
+		humanoid.WalkSpeed = self.savedWalkSpeed or humanoid.WalkSpeed
+		humanoid.JumpPower = self.savedJumpPower or humanoid.JumpPower
+	end
+	self.savedWalkSpeed = nil
+	self.savedJumpPower = nil
+	self.pawn:SetAutoRotate(true)
+end
+
+-- ==============================================================================
 -- STATE MANAGEMENT
 -- ==============================================================================
 
@@ -1121,6 +1176,8 @@ function Controller:ChangeState(newState)
 	elseif self.currentState == AIState.ATTACKING then
 		-- Re-activar AutoRotate al salir de combate
 		self.pawn:SetAutoRotate(true)
+	elseif self.currentState == AIState.STUNNED then
+		self:ExitStunned()
 	end
 
 	local oldState = self.currentState
@@ -1149,6 +1206,8 @@ function Controller:ChangeState(newState)
 		self.pawn:SetAutoRotate(false)
 	elseif newState == AIState.RETURNING then
 		self:EnterReturning()
+	elseif newState == AIState.STUNNED then
+		self:EnterStunned()
 	end
 end
 

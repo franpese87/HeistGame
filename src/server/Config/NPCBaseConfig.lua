@@ -67,6 +67,9 @@ return {
 	-- Intervalo de recalculación de path durante persecución (segundos)
 	pathRecalcInterval = 1.5,     -- [DIFICULTAD] Más alto = más fácil despistar al NPC
 
+	-- Stun por portazo
+	stunDuration = 3,             -- [DIFICULTAD] Duración del aturdimiento (segundos)
+
 	-- Indicador visual de estado (debug)
 	stateIndicatorOffset = 4,
 }
