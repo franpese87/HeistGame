@@ -9,7 +9,6 @@
 	Estructura esperada del Model:
 	▼ Door_Name (Model, Tag: "Door")
 	  ● DoorPart          -- Part física que rota al abrir
-	  ● SmashPart         -- Pared contra la que se empuja al personaje (portazo)
 	  ● ProximityPrompt   -- Hijo de DoorPart, para interacción del jugador
 
 	Atributos del Model:
@@ -28,6 +27,7 @@ local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 
 local GeometryVersion = require(script.Parent.GeometryVersion)
+local StunService = require(script.Parent.StunService)
 local DebugConfig = require(script.Parent.Parent.Config.DebugConfig)
 
 local DoorService = {}
@@ -183,8 +183,6 @@ function DoorService._RegisterDoor(doorModel)
 		return
 	end
 
-	local smashPart = doorModel:FindFirstChild("SmashPart")
-
 	-- Leer configuración desde atributos del Model
 	local isOpen = doorModel:GetAttribute("isOpen") or false
 	local openAngle = doorModel:GetAttribute("openAngle") or 90
@@ -219,7 +217,6 @@ function DoorService._RegisterDoor(doorModel)
 		closedCFrame = closedCFrame,
 		hingeOffset = hingeOffset,
 		angleValue = angleValue,
-		smashPart = smashPart,
 		connection = nil,  -- RenderStepped/Heartbeat connection
 	}
 
@@ -256,34 +253,38 @@ end
 -- DETECCIÓN DE PORTAZO
 -- ==============================================================================
 
--- Desplaza al personaje lateralmente (eje RightVector de la puerta) hasta la SmashPart.
--- Solo se mueve en el eje perpendicular a la cara de la puerta, nunca adelante/atrás.
-local function applySmashKnockback(rootPart, smashPart, doorClosedCFrame)
+-- Desplaza al personaje lateralmente hacia la pared más cercana (raycast).
+-- Solo se mueve en el eje RightVector de la puerta, nunca adelante/atrás.
+local knockbackRayParams = RaycastParams.new()
+knockbackRayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+local function applySmashKnockback(rootPart, doorClosedCFrame, doorModel, hingeOffset)
 	local rightAxis = (doorClosedCFrame.RightVector * Vector3.new(1, 0, 1)).Unit
 
-	-- Proyectar SmashPart y personaje sobre el eje lateral de la puerta
-	local smashProj = smashPart.Position:Dot(rightAxis)
-	local charProj = rootPart.Position:Dot(rightAxis)
-	local direction = smashProj > charProj and 1 or -1
+	-- Dirección del knockback: siempre hacia el lado del hinge
+	local hingePos = (doorClosedCFrame * hingeOffset).Position
+	local doorCenter = doorClosedCFrame.Position
+	local toHinge = (hingePos - doorCenter):Dot(rightAxis)
+	local knockbackDir = rightAxis * (toHinge >= 0 and 1 or -1)
 
-	-- Limitar desplazamiento a la superficie de la SmashPart (no atravesar)
-	local smashLocalRight = math.abs(smashPart.CFrame.RightVector:Dot(rightAxis))
-	local smashLocalLook = math.abs(smashPart.CFrame.LookVector:Dot(rightAxis))
-	local smashHalfLateral = (smashPart.Size.X / 2) * smashLocalRight
-		+ (smashPart.Size.Z / 2) * smashLocalLook
+	-- Raycast lateral desde el personaje hacia la pared
+	local maxDistance = 15
 	local characterMargin = 1.5
-	local surfaceProj = smashProj - direction * (smashHalfLateral + characterMargin)
+	knockbackRayParams.FilterDescendantsInstances = {rootPart.Parent, doorModel}
+	local rayResult = workspace:Raycast(rootPart.Position, knockbackDir * maxDistance, knockbackRayParams)
 
-	local displacement = surfaceProj - charProj
-	if math.abs(displacement) < 0.1 then return end
+	local wallDistance = rayResult
+		and (rayResult.Position - rootPart.Position).Magnitude - characterMargin
+		or maxDistance
+	wallDistance = math.max(wallDistance, 0)
+
+	if wallDistance < 0.1 then return end
 
 	local startPos = rootPart.Position
-	local targetPos = startPos + rightAxis * displacement
-	local distance = math.abs(displacement)
-	local arcHeight = math.max(distance * 0.3, 1.5)
+	local targetPos = startPos + knockbackDir * wallDistance
+	local arcHeight = math.max(wallDistance * 0.3, 1.5)
 
-	-- Orientar de espaldas a la SmashPart (mirando hacia el centro del pasillo)
-	local knockbackDir = (rightAxis * direction)
+	-- Orientar de espaldas a la pared (mirando hacia el centro del pasillo)
 	local facingYaw = math.atan2(knockbackDir.X, knockbackDir.Z)
 
 	-- Animación: arco parabólico lateral con rotación
@@ -295,7 +296,6 @@ local function applySmashKnockback(rootPart, smashPart, doorClosedCFrame)
 			if not rootPart.Parent then return end
 			local t = i / steps
 
-			-- Interpolación lateral + arco Y parabólico
 			local pos = startPos:Lerp(targetPos, t)
 			local arcY = arcHeight * 4 * t * (1 - t)
 			pos = Vector3.new(pos.X, startPos.Y + arcY, pos.Z)
@@ -304,7 +304,6 @@ local function applySmashKnockback(rootPart, smashPart, doorClosedCFrame)
 			task.wait()
 		end
 
-		-- Posición final exacta contra la pared
 		rootPart.CFrame = CFrame.new(targetPos) * CFrame.Angles(0, facingYaw, 0)
 	end)
 end
@@ -322,7 +321,9 @@ local function isInsideSweepArc(point, hingePos, baseDir, sweepAngle, sign, radi
 	return angle >= 0 and angle <= sweepAngle
 end
 
-local function detectAndStunCharacters(data, activeSign, openerInstance)
+-- Crea un detector continuo que chequea cada frame durante la apertura.
+-- Devuelve una función onFrame para usar en animateDoor.
+local function createSweepDetector(data, activeSign, openerInstance)
 	local hingePos = (data.closedCFrame * data.hingeOffset).Position
 	local radius = data.doorPart.Size.X
 	local sweepAngle = math.rad(data.openAngle)
@@ -331,56 +332,49 @@ local function detectAndStunCharacters(data, activeSign, openerInstance)
 	local freeEdgeWorld = (data.closedCFrame * freeEdgeLocal).Position
 	local baseDir = ((freeEdgeWorld - hingePos) * Vector3.new(1, 0, 1)).Unit
 
+	local alreadyHit = {}
+	if openerInstance then
+		alreadyHit[openerInstance] = true
+	end
+
 	local function tryStunModel(model)
-		if model == openerInstance then return end
+		if alreadyHit[model] then return end
 		local rootPart = model:FindFirstChild("HumanoidRootPart")
 		if not rootPart then return end
 		if not isInsideSweepArc(rootPart.Position, hingePos, baseDir, sweepAngle, activeSign, radius) then return end
 
-		-- NPC: estado Stunned (PlatformStand primero, para que el tween funcione)
+		alreadyHit[model] = true
+
+		-- NPC: estado Stunned
 		if registry then
 			local npcData = registry:GetNPCByInstance(model)
 			if npcData and npcData.controller.isActive and npcData.controller.currentState ~= "Stunned" then
 				npcData.controller:ApplyStun()
-				if data.smashPart then
-					applySmashKnockback(rootPart, data.smashPart, data.closedCFrame)
-				end
+				applySmashKnockback(rootPart, data.closedCFrame, data.model, data.hingeOffset)
 				return
 			end
 		end
 
-		-- Player: inmovilizar durante stunDuration
+		-- Player: stun centralizado
 		local humanoid = model:FindFirstChildOfClass("Humanoid")
 		if humanoid and humanoid.Health > 0 then
-			local savedWalkSpeed = humanoid.WalkSpeed
-			local savedJumpPower = humanoid.JumpPower
-			humanoid.WalkSpeed = 0
-			humanoid.JumpPower = 0
-
-			if data.smashPart then
-				applySmashKnockback(rootPart, data.smashPart, data.closedCFrame)
-			end
-
-			task.delay(stunDuration, function()
-				if humanoid and humanoid.Parent then
-					humanoid.WalkSpeed = savedWalkSpeed
-					humanoid.JumpPower = savedJumpPower
-				end
-			end)
+			StunService.Apply(humanoid, stunDuration)
+			applySmashKnockback(rootPart, data.closedCFrame, data.model, data.hingeOffset)
 		end
 	end
 
-	-- Chequear NPCs
-	if registry then
-		registry:ForEach(function(_id, pawn, _controller)
-			tryStunModel(pawn:GetInstance())
-		end)
-	end
+	-- Devuelve la función que se ejecuta cada frame
+	return function()
+		if registry then
+			registry:ForEach(function(_id, pawn, _controller)
+				tryStunModel(pawn:GetInstance())
+			end)
+		end
 
-	-- Chequear Players
-	for _, player in ipairs(Players:GetPlayers()) do
-		if player.Character then
-			tryStunModel(player.Character)
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player.Character then
+				tryStunModel(player.Character)
+			end
 		end
 	end
 end
@@ -389,7 +383,7 @@ end
 -- ANIMACIÓN (rotación sobre bisagra frame a frame)
 -- ==============================================================================
 
-local function animateDoor(data, targetAngle, easingDirection, onComplete)
+local function animateDoor(data, targetAngle, easingDirection, onFrame, onComplete)
 	-- Desconectar animación anterior si existe
 	if data.connection then
 		data.connection:Disconnect()
@@ -407,6 +401,11 @@ local function animateDoor(data, targetAngle, easingDirection, onComplete)
 			data.hingeOffset,
 			data.angleValue.Value
 		)
+
+		-- Sweep detection (solo durante apertura)
+		if onFrame then
+			onFrame()
+		end
 	end)
 
 	tween:Play()
@@ -468,9 +467,9 @@ function DoorService.Open(doorModel, openerPosition, openerInstance)
 	local cross = baseDir.X * finalDir.Unit.Z - baseDir.Z * finalDir.Unit.X
 	local activeSign = cross >= 0 and 1 or -1
 	setSweepDebugActive(data, activeSign, true)
-	detectAndStunCharacters(data, activeSign, openerInstance)
+	local sweepOnFrame = createSweepDetector(data, activeSign, openerInstance)
 
-	animateDoor(data, angle, Enum.EasingDirection.Out, function()
+	animateDoor(data, angle, Enum.EasingDirection.Out, sweepOnFrame, function()
 		data.isAnimating = false
 		setSweepDebugActive(data, activeSign, false)
 		GeometryVersion.Increment()
@@ -502,7 +501,7 @@ function DoorService.Close(doorModel)
 	-- Restaurar colisión antes de cerrar para que bloquee
 	data.doorPart.CanCollide = true
 
-	animateDoor(data, 0, Enum.EasingDirection.In, function()
+	animateDoor(data, 0, Enum.EasingDirection.In, nil, function()
 		data.isAnimating = false
 		GeometryVersion.Increment()
 	end)

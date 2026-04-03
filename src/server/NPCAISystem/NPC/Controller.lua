@@ -17,6 +17,7 @@ local Combat = require(script.Parent.Parent.Components.Combat)
 local HearingSensor = require(script.Parent.Parent.Components.HearingSensor)
 local GeometryVersion = require(script.Parent.Parent.Parent.Services.GeometryVersion)
 local DoorService = require(script.Parent.Parent.Parent.Services.DoorService)
+local StunService = require(script.Parent.Parent.Parent.Services.StunService)
 local DebugConfig = require(script.Parent.Parent.Parent.Config.DebugConfig)
 local Visualizer = require(script.Parent.Parent.Debug.Visualizer)
 
@@ -1121,14 +1122,17 @@ function Controller:EnterStunned()
 	self.pawn:SetAutoRotate(false)
 	self.pawn:PlayAnimation("idle")
 
-	-- Inmovilizar sin desactivar física (WalkSpeed=0 mantiene colisión con suelo)
+	-- Inmovilizar via StunService (no usamos su timer, lo gestiona UpdateStunned)
 	local humanoid = self.pawn:GetHumanoid()
 	if humanoid then
-		self.savedWalkSpeed = humanoid.WalkSpeed
-		self.savedJumpPower = humanoid.JumpPower
-		humanoid.WalkSpeed = 0
-		humanoid.JumpPower = 0
+		StunService.Apply(humanoid, math.huge)
 	end
+
+	-- Limpiar debug visuals de sensores para que no queden congelados
+	-- (el knockback mueve al NPC pero Update no llama Scan en STUNNED)
+	self.visionSensor:ClearRangeCircle()
+	self.visionSensor:ClearConeBoundaries()
+	self.visionSensor:ClearLineOfSight()
 
 	self.target = nil
 	self.lastSeenPosition = nil
@@ -1144,11 +1148,8 @@ end
 function Controller:ExitStunned()
 	local humanoid = self.pawn:GetHumanoid()
 	if humanoid then
-		humanoid.WalkSpeed = self.savedWalkSpeed or humanoid.WalkSpeed
-		humanoid.JumpPower = self.savedJumpPower or humanoid.JumpPower
+		StunService.Remove(humanoid)
 	end
-	self.savedWalkSpeed = nil
-	self.savedJumpPower = nil
 	self.pawn:SetAutoRotate(true)
 end
 
