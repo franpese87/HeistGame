@@ -1,5 +1,7 @@
 local NPCAISystem = require(script.NPCAISystem)
 local DoorService = require(script.Services.DoorService)
+local ProjectileService = require(script.Services.ProjectileService)
+local TaserConfig = require(script.Config.TaserConfig)
 local DebugConfig = require(script.Config.DebugConfig)
 local NPCBaseConfig = require(script.Config.NPCBaseConfig)
 local NPCSpawnList = require(script.Config.NPCSpawnList)
@@ -14,6 +16,57 @@ print("🎮 Iniciando sistema de NPCs...")
 -- ==============================================================================
 
 DoorService.Init()
+ProjectileService.Init()
+
+-- ==============================================================================
+-- 0.5 REMOTE EVENTS
+-- ==============================================================================
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+if not eventsFolder then
+	eventsFolder = Instance.new("Folder")
+	eventsFolder.Name = "Events"
+	eventsFolder.Parent = ReplicatedStorage
+end
+
+local taserEvent = Instance.new("RemoteEvent")
+taserEvent.Name = "TaserFire"
+taserEvent.Parent = eventsFolder
+
+-- Cooldown tracking por player (server-side autoritativo)
+local lastFireTimes = {}
+
+taserEvent.OnServerEvent:Connect(function(player)
+	local now = os.clock()
+
+	-- Validar cooldown server-side
+	if lastFireTimes[player] and now - lastFireTimes[player] < TaserConfig.cooldown then
+		return
+	end
+
+	-- Validar que el character existe
+	local character = player.Character
+	if not character then return end
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not rootPart then return end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then return end
+
+	-- Usar posición y dirección del SERVER (anti-spoofing)
+	local origin = rootPart.Position
+	local direction = (rootPart.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+
+	lastFireTimes[player] = now
+	ProjectileService.Fire(origin, direction, TaserConfig, character)
+end)
+
+-- Limpiar tracking cuando el player sale
+Players.PlayerRemoving:Connect(function(player)
+	lastFireTimes[player] = nil
+end)
 
 -- ==============================================================================
 -- 1. CREAR GRAFO DE NAVEGACIÓN
