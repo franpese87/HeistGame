@@ -18,6 +18,8 @@ local HearingSensor = require(script.Parent.Parent.Components.HearingSensor)
 local GeometryVersion = require(script.Parent.Parent.Parent.Services.GeometryVersion)
 local DoorService = require(script.Parent.Parent.Parent.Services.DoorService)
 local StunService = require(script.Parent.Parent.Parent.Services.StunService)
+local ProjectileService = require(script.Parent.Parent.Parent.Services.ProjectileService)
+local TaserConfig = require(script.Parent.Parent.Parent.Config.TaserConfig)
 local DebugConfig = require(script.Parent.Parent.Parent.Config.DebugConfig)
 local Visualizer = require(script.Parent.Parent.Debug.Visualizer)
 
@@ -100,6 +102,11 @@ function Controller.new(pawn, navigationGraph, config)
 
 	-- Stun (portazo)
 	self.stunDuration = config.stunDuration or 3
+
+	-- Arma
+	self.weaponType = config.weaponType or "melee"
+	self.taserEngageDistance = config.taserEngageDistance or 20
+	self.lastTaserFireTime = 0
 
 	-- Componentes (Sensores y Combate)
 	local npcInstance = pawn:GetInstance()
@@ -751,7 +758,8 @@ function Controller:UpdateChasing()
 	end
 
 	local distance = (self.pawn:GetPosition() - targetRoot.Position).Magnitude
-	if distance <= self.combatSystem.attackRange then
+	local engageDistance = self.weaponType == "taser" and self.taserEngageDistance or self.combatSystem.attackRange
+	if distance <= engageDistance then
 		self.currentPath = nil
 		self:ChangeState(AIState.ATTACKING)
 		return
@@ -926,7 +934,8 @@ function Controller:UpdateAttacking()
 	end
 
 	local distance = (self.pawn:GetPosition() - targetRoot.Position).Magnitude
-	if distance > (self.combatSystem.attackRange + 1) then
+	local disengageDistance = self.weaponType == "taser" and (self.taserEngageDistance + 5) or (self.combatSystem.attackRange + 1)
+	if distance > disengageDistance then
 		self:ChangeState(AIState.CHASING)
 		return
 	end
@@ -938,7 +947,43 @@ function Controller:UpdateAttacking()
 		self.pawn:LerpCFrame(targetCFrame, self.attackRotationSpeed)
 	end
 
-	self.combatSystem:TryAttack(self.target)
+	if self.weaponType == "taser" then
+		self:UpdateAttackingTaser(targetRoot)
+	else
+		self.combatSystem:TryAttack(self.target)
+	end
+end
+
+function Controller:UpdateAttackingTaser(targetRoot)
+	local now = os.clock()
+	if now - self.lastTaserFireTime < TaserConfig.cooldown then
+		return
+	end
+
+	-- Verificar LOS antes de disparar
+	local npcPos = self.pawn:GetPosition()
+	local targetPos = targetRoot.Position
+	local direction = (targetPos - npcPos) * Vector3.new(1, 0, 1)
+	if direction.Magnitude < 0.1 then return end
+	direction = direction.Unit
+
+	-- Raycast de LOS (reutilizar raycastParams del controller, que ya excluye al NPC)
+	local origin = npcPos + Vector3.new(0, TaserConfig.projectileYOffset or 0, 0)
+	local toTarget = targetPos - origin
+	local losResult = workspace:Raycast(origin, toTarget, self.raycastParams)
+
+	-- Solo disparar si el raycast golpea al target (o no golpea nada = LOS libre)
+	local hasLOS = not losResult or losResult.Instance:IsDescendantOf(targetRoot.Parent)
+	if not hasLOS then
+		-- Sin línea de visión: volver a perseguir para reposicionarse
+		self:ChangeState(AIState.CHASING)
+		return
+	end
+
+	-- Disparar
+	self.lastTaserFireTime = now
+	local npcInstance = self.pawn:GetInstance()
+	ProjectileService.Fire(npcPos, direction, TaserConfig, npcInstance)
 end
 
 -- ==============================================================================
