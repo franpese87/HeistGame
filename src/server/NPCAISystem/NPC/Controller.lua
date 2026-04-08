@@ -982,6 +982,7 @@ function Controller:UpdateAttackingTaser(targetRoot)
 
 	-- Disparar
 	self.lastTaserFireTime = now
+	self.pawn:PlayAnimationOnce("shoot")
 	local npcInstance = self.pawn:GetInstance()
 	ProjectileService.Fire(npcPos, direction, TaserConfig, npcInstance)
 end
