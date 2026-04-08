@@ -114,12 +114,11 @@ local function createTaserTool()
 end
 
 local function equipTaserToCharacter(character)
-	local humanoid = character:WaitForChild("Humanoid", 5)
-	if not humanoid then return end
+	-- Esperar a que el character esté completamente cargado
+	character:WaitForChild("Humanoid", 5)
 
 	local tool = createTaserTool()
-	tool.Parent = character
-	humanoid:EquipTool(tool)
+	tool.Parent = character  -- Parenting directo al character = equipado automáticamente por Roblox
 end
 
 Players.PlayerAdded:Connect(function(player)
