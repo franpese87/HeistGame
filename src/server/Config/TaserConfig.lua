@@ -17,4 +17,8 @@ return {
 
 	-- Animación
 	shootAnimationId = "",       -- placeholder: asignar rbxassetid://... cuando esté listo
+
+	-- Modelo de la tool (jugador)
+	toolModelId = "",            -- placeholder: asignar rbxassetid://... de un Tool asset cuando esté listo
+	                             -- Si está vacío, se usa el modelo procedural (cilindro azul)
 }

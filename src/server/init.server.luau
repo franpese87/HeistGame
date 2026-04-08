@@ -72,13 +72,7 @@ end)
 -- 0.75 PLAYER SETUP - Tool de Taser
 -- ==============================================================================
 
-local function createTaserTool()
-	local tool = Instance.new("Tool")
-	tool.Name = "Taser"
-	tool.RequiresHandle = true
-	tool.CanBeDropped = false
-	tool.ToolTip = ""
-
+local function createTaserHandleProcedural(tool)
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
 	handle.Size = Vector3.new(0.25, 0.25, 0.8)
@@ -86,7 +80,36 @@ local function createTaserTool()
 	handle.Material = Enum.Material.SmoothPlastic
 	handle.CanCollide = false
 	handle.Parent = tool
+end
 
+local function createTaserTool()
+	-- Intentar usar asset si está configurado
+	local modelId = TaserConfig.toolModelId
+	if modelId and modelId ~= "" then
+		local success, result = pcall(function()
+			return game:GetService("InsertService"):LoadAsset(tonumber(modelId:match("%d+")))
+		end)
+		if success and result then
+			local toolAsset = result:FindFirstChildOfClass("Tool")
+			if toolAsset then
+				toolAsset.Name = "Taser"
+				toolAsset.CanBeDropped = false
+				toolAsset.Parent = nil
+				result:Destroy()
+				return toolAsset
+			end
+			result:Destroy()
+		end
+		warn("[TaserTool] No se pudo cargar el asset '" .. modelId .. "', usando modelo procedural")
+	end
+
+	-- Fallback: modelo procedural
+	local tool = Instance.new("Tool")
+	tool.Name = "Taser"
+	tool.RequiresHandle = true
+	tool.CanBeDropped = false
+	tool.ToolTip = ""
+	createTaserHandleProcedural(tool)
 	return tool
 end
 
