@@ -132,11 +132,18 @@ local function initialize(character)
 		return
 	end
 
-	-- Esperar la tool creada por el servidor
-	local tool = character:WaitForChild("Taser", EVENT_TIMEOUT)
+	-- Esperar la tool en el Backpack (creada por el servidor)
+	local backpack = player:WaitForChild("Backpack", EVENT_TIMEOUT)
+	local tool = backpack and backpack:WaitForChild("Taser", EVENT_TIMEOUT)
 	if not tool then
-		warn("[TaserTool] Tool Taser no encontrada en el character")
+		warn("[TaserTool] Tool Taser no encontrada en el Backpack")
 		return
+	end
+
+	-- Equipar desde el cliente para que el input se registre correctamente
+	local humanoid = character:WaitForChild("Humanoid", 5)
+	if humanoid then
+		humanoid:EquipTool(tool)
 	end
 
 	local cooldownLabel = createCooldownUI()

@@ -114,13 +114,12 @@ local function createTaserTool()
 end
 
 local function equipTaserToPlayer(player, character)
-	local humanoid = character:WaitForChild("Humanoid", 5)
-	if not humanoid then return end
+	character:WaitForChild("Humanoid", 5)
+	local backpack = player:WaitForChild("Backpack", 5)
+	if not backpack then return end
 
 	local tool = createTaserTool()
-	-- Poner en Backpack primero para que Roblox cree el weld de mano correctamente
-	tool.Parent = player:WaitForChild("Backpack", 5)
-	humanoid:EquipTool(tool)
+	tool.Parent = backpack  -- El cliente equipa desde LocalScript para registrar input correctamente
 end
 
 local function setupPlayerTaser(player)
