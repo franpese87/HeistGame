@@ -94,6 +94,7 @@ function Pawn.new(npcInstance, config)
 	config = config or {}
 	self.patrolSpeed = config.patrolSpeed or 16
 	self.chaseSpeed = config.chaseSpeed or 24
+	self.weaponType = config.weaponType or "melee"
 
 	-- Inicializar sistema de animaciones
 	self:_InitializeAnimations()
@@ -139,6 +140,24 @@ function Pawn:_InitializeAnimations()
 		self.janitor:Add(track, "Destroy")
 	end
 
+	-- Track de disparo (solo NPCs taser, solo si hay ID configurado)
+	if self.weaponType == "taser" then
+		local TaserConfig = require(script.Parent.Parent.Parent.Config.TaserConfig)
+		local shootId = TaserConfig.shootAnimationId
+		if shootId and shootId ~= "" then
+			local shootAnim = Instance.new("Animation")
+			shootAnim.Name = "shoot"
+			shootAnim.AnimationId = shootId
+			self.animations["shoot"] = shootAnim
+
+			local shootTrack = self.animator:LoadAnimation(shootAnim)
+			shootTrack.Looped = false
+			shootTrack.Priority = Enum.AnimationPriority.Action
+			self.animationTracks["shoot"] = shootTrack
+			self.janitor:Add(shootTrack, "Destroy")
+		end
+	end
+
 	self.currentAnimation = nil
 	self.currentTrack = nil
 
@@ -167,6 +186,32 @@ function Pawn:PlayAnimation(animName, fadeTime)
 
 	self.currentAnimation = animName
 	self.currentTrack = track
+end
+
+-- Reproduce una animación non-looped y retoma la animación previa al terminar.
+-- Si la animación es interrumpida externamente (cambio de estado), no retoma.
+function Pawn:PlayAnimationOnce(animName, fadeTime)
+	if not self.animationTracks[animName] then return end
+	fadeTime = fadeTime or 0.1
+
+	local track = self.animationTracks[animName]
+	local previousAnimation = self.currentAnimation or "idle"
+
+	if self.currentTrack then
+		self.currentTrack:Stop(fadeTime)
+	end
+
+	self.currentAnimation = animName
+	self.currentTrack = track
+	track:Play(fadeTime)
+
+	track.Stopped:Once(function()
+		if self.currentAnimation == animName then
+			self.currentAnimation = nil
+			self.currentTrack = nil
+			self:PlayAnimation(previousAnimation, fadeTime)
+		end
+	end)
 end
 
 function Pawn:StopAnimations()
