@@ -123,20 +123,19 @@ local function equipTaserToPlayer(player, character)
 	humanoid:EquipTool(tool)
 end
 
-Players.PlayerAdded:Connect(function(player)
+local function setupPlayerTaser(player)
 	player.CharacterAdded:Connect(function(character)
 		equipTaserToPlayer(player, character)
 	end)
-end)
-
--- Jugadores que ya están en el servidor al iniciar (si se reinicia el script en Studio)
-for _, player in ipairs(Players:GetPlayers()) do
+	-- Character ya cargado (jugadores presentes al iniciar el script en Studio)
 	if player.Character then
 		task.spawn(equipTaserToPlayer, player, player.Character)
 	end
-	player.CharacterAdded:Connect(function(character)
-		equipTaserToPlayer(player, character)
-	end)
+end
+
+Players.PlayerAdded:Connect(setupPlayerTaser)
+for _, player in ipairs(Players:GetPlayers()) do
+	setupPlayerTaser(player)
 end
 
 -- ==============================================================================
