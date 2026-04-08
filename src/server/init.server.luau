@@ -69,6 +69,53 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 -- ==============================================================================
+-- 0.75 PLAYER SETUP - Tool de Taser
+-- ==============================================================================
+
+local function createTaserTool()
+	local tool = Instance.new("Tool")
+	tool.Name = "Taser"
+	tool.RequiresHandle = true
+	tool.CanBeDropped = false
+	tool.ToolTip = ""
+
+	local handle = Instance.new("Part")
+	handle.Name = "Handle"
+	handle.Size = Vector3.new(0.25, 0.25, 0.8)
+	handle.Color = Color3.fromRGB(30, 120, 220)
+	handle.Material = Enum.Material.SmoothPlastic
+	handle.CanCollide = false
+	handle.Parent = tool
+
+	return tool
+end
+
+local function equipTaserToCharacter(character)
+	local humanoid = character:WaitForChild("Humanoid", 5)
+	if not humanoid then return end
+
+	local tool = createTaserTool()
+	tool.Parent = character
+	humanoid:EquipTool(tool)
+end
+
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(function(character)
+		equipTaserToCharacter(character)
+	end)
+end)
+
+-- Jugadores que ya están en el servidor al iniciar (si se reinicia el script en Studio)
+for _, player in ipairs(Players:GetPlayers()) do
+	if player.Character then
+		equipTaserToCharacter(player.Character)
+	end
+	player.CharacterAdded:Connect(function(character)
+		equipTaserToCharacter(character)
+	end)
+end
+
+-- ==============================================================================
 -- 1. CREAR GRAFO DE NAVEGACIÓN
 -- ==============================================================================
 
