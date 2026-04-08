@@ -113,27 +113,29 @@ local function createTaserTool()
 	return tool
 end
 
-local function equipTaserToCharacter(character)
-	-- Esperar a que el character esté completamente cargado
-	character:WaitForChild("Humanoid", 5)
+local function equipTaserToPlayer(player, character)
+	local humanoid = character:WaitForChild("Humanoid", 5)
+	if not humanoid then return end
 
 	local tool = createTaserTool()
-	tool.Parent = character  -- Parenting directo al character = equipado automáticamente por Roblox
+	-- Poner en Backpack primero para que Roblox cree el weld de mano correctamente
+	tool.Parent = player:WaitForChild("Backpack", 5)
+	humanoid:EquipTool(tool)
 end
 
 Players.PlayerAdded:Connect(function(player)
 	player.CharacterAdded:Connect(function(character)
-		equipTaserToCharacter(character)
+		equipTaserToPlayer(player, character)
 	end)
 end)
 
 -- Jugadores que ya están en el servidor al iniciar (si se reinicia el script en Studio)
 for _, player in ipairs(Players:GetPlayers()) do
 	if player.Character then
-		equipTaserToCharacter(player.Character)
+		task.spawn(equipTaserToPlayer, player, player.Character)
 	end
 	player.CharacterAdded:Connect(function(character)
-		equipTaserToCharacter(character)
+		equipTaserToPlayer(player, character)
 	end)
 end
 
