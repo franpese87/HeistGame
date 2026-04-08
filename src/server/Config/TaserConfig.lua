@@ -14,4 +14,7 @@ return {
 	-- Visual
 	projectileColor = Color3.fromRGB(100, 180, 255),  -- azul eléctrico
 	projectileYOffset = 0,       -- offset Y desde RootPart del shooter (0 = altura de cadera)
+
+	-- Animación
+	shootAnimationId = "",       -- placeholder: asignar rbxassetid://... cuando esté listo
 }
