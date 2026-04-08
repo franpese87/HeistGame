@@ -4,12 +4,12 @@
 return {
 	{
 		name = "Guard_1",
-		patrolRoute = { "Node_0_94", "Node_0_424" },
+		patrolRoute = { "Node_0_964", "Node_0_226" },
 	},
 
 	{
 		name = "Guard_2",
-		patrolRoute = { "Node_0_405", "Node_0_415" },
+		patrolRoute = { "Node_0_928", "Node_0_951" },
 		weaponType = "taser",
 	},
 }
