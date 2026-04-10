@@ -75,7 +75,8 @@ end)
 local function createTaserHandleProcedural(tool)
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
-	handle.Size = Vector3.new(0.25, 0.25, 0.8)
+	handle.Shape = Enum.PartType.Cylinder
+	handle.Size = Vector3.new(0.8, 0.3, 0.3)
 	handle.Color = Color3.fromRGB(30, 120, 220)
 	handle.Material = Enum.Material.SmoothPlastic
 	handle.CanCollide = false
