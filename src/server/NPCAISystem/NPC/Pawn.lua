@@ -95,6 +95,7 @@ function Pawn.new(npcInstance, config)
 	self.patrolSpeed = config.patrolSpeed or 16
 	self.chaseSpeed = config.chaseSpeed or 24
 	self.weaponType = config.weaponType or "melee"
+	self.equippedWeaponTool = nil
 
 	-- Inicializar sistema de animaciones
 	self:_InitializeAnimations()
@@ -212,6 +213,30 @@ function Pawn:PlayAnimationOnce(animName, fadeTime)
 			self:PlayAnimation(previousAnimation, fadeTime)
 		end
 	end)
+end
+
+-- ==============================================================================
+-- VISUAL DE ARMA
+-- ==============================================================================
+
+function Pawn:EquipWeaponVisual()
+	if self.weaponType ~= "taser" then return end
+	if self.equippedWeaponTool then return end
+	local taserTemplate = game:GetService("StarterPack"):FindFirstChild("Taser")
+	if not taserTemplate then return end
+
+	local clone = taserTemplate:Clone()
+	clone.CanBeDropped = false
+	clone.Parent = self.instance
+	self.humanoid:EquipTool(clone)
+	self.equippedWeaponTool = clone
+end
+
+function Pawn:UnequipWeaponVisual()
+	if self.equippedWeaponTool then
+		self.equippedWeaponTool:Destroy()
+		self.equippedWeaponTool = nil
+	end
 end
 
 function Pawn:StopAnimations()
@@ -453,6 +478,8 @@ end
 -- ==============================================================================
 
 function Pawn:Destroy()
+	self:UnequipWeaponVisual()
+
 	-- Janitor limpia automáticamente: tweens, tracks, billboard
 	self.janitor:Destroy()
 

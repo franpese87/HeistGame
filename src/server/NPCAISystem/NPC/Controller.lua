@@ -1016,6 +1016,12 @@ function Controller:EnterInvestigating()
 end
 
 function Controller:UpdateInvestigating()
+	-- Si vemos al target mientras investigamos, reanudar persecución inmediatamente
+	if self.lastVisionEvents and self.lastVisionEvents.TargetVisible and self.target then
+		self:ChangeState(AIState.CHASING)
+		return
+	end
+
 	if os.clock() - self.investigationStartTime > self.investigationDuration then
 		self:ChangeState(AIState.RETURNING)
 		return
@@ -1223,6 +1229,7 @@ function Controller:ChangeState(newState)
 	elseif self.currentState == AIState.ATTACKING then
 		-- Re-activar AutoRotate al salir de combate
 		self.pawn:SetAutoRotate(true)
+		self.pawn:UnequipWeaponVisual()
 	elseif self.currentState == AIState.STUNNED then
 		self:ExitStunned()
 	end
@@ -1251,6 +1258,7 @@ function Controller:ChangeState(newState)
 	elseif newState == AIState.ATTACKING then
 		-- Desactivar AutoRotate para control manual de rotación
 		self.pawn:SetAutoRotate(false)
+		self.pawn:EquipWeaponVisual()
 	elseif newState == AIState.RETURNING then
 		self:EnterReturning()
 	elseif newState == AIState.STUNNED then

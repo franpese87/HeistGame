@@ -56,6 +56,7 @@ function Pawn:EquipWeaponVisual()
 
 	local clone = taserTemplate:Clone()
 	clone.CanBeDropped = false
+	clone.Parent = self.instance
 	self.humanoid:EquipTool(clone)
 	self.equippedWeaponTool = clone
 end

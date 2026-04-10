@@ -27,7 +27,7 @@ Guard_2 ya dispara el proyectil taser con su IA, pero no lleva ningún modelo vi
 **`Pawn:EquipWeaponVisual()`**
 - Solo actúa si `self.weaponType == "taser"`.
 - Busca `game.StarterPack:FindFirstChild("Taser")`. Si no existe, sale silenciosamente.
-- Clona el tool, establece `CanBeDropped = false`.
+- Clona el tool, establece `CanBeDropped = false`, parentea al NPC (`clone.Parent = self.instance`).
 - Llama `self.humanoid:EquipTool(clone)` — Roblox crea el weld `RightGrip` automáticamente.
 - Guarda la referencia en `self.equippedWeaponTool`.
 
