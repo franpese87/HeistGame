@@ -17,4 +17,8 @@ return {
 
 	-- Animación
 	shootAnimationId = "",       -- placeholder: asignar rbxassetid://... cuando esté listo
+
+	-- Modelo de la tool (jugador)
+	toolModelId = "rbxassetid://179399313",  -- Roblox Taser (catalog free model)
+	                                         -- Si está vacío, se usa el modelo procedural (cilindro azul)
 }
