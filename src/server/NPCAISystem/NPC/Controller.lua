@@ -919,7 +919,7 @@ end
 
 function Controller:UpdateAttacking()
 	self.pawn:StopMovement()
-	self.pawn:PlayAnimation("idle")
+	self.pawn:PlayAnimation(self.pawn.animationTracks["toolhold"] and "toolhold" or "idle")
 
 	if not self.target then
 		self:ChangeState(AIState.RETURNING)
@@ -1259,6 +1259,7 @@ function Controller:ChangeState(newState)
 		-- Desactivar AutoRotate para control manual de rotación
 		self.pawn:SetAutoRotate(false)
 		self.pawn:EquipWeaponVisual()
+		self.pawn:PlayAnimation(self.pawn.animationTracks["toolhold"] and "toolhold" or "idle")
 	elseif newState == AIState.RETURNING then
 		self:EnterReturning()
 	elseif newState == AIState.STUNNED then

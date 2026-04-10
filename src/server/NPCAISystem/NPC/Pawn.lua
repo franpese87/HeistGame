@@ -141,9 +141,25 @@ function Pawn:_InitializeAnimations()
 		self.janitor:Add(track, "Destroy")
 	end
 
-	-- Track de disparo (solo NPCs taser, solo si hay ID configurado)
+	-- Tracks de arma (solo NPCs taser)
 	if self.weaponType == "taser" then
+		-- Animaciones de arma (solo si hay ID configurado)
 		local TaserConfig = require(script.Parent.Parent.Parent.Config.TaserConfig)
+
+		local toolholdId = TaserConfig.toolholdAnimationId
+		if toolholdId and toolholdId ~= "" then
+			local toolholdAnim = Instance.new("Animation")
+			toolholdAnim.Name = "toolhold"
+			toolholdAnim.AnimationId = toolholdId
+			self.animations["toolhold"] = toolholdAnim
+
+			local toolholdTrack = self.animator:LoadAnimation(toolholdAnim)
+			toolholdTrack.Looped = true
+			toolholdTrack.Priority = Enum.AnimationPriority.Action
+			self.animationTracks["toolhold"] = toolholdTrack
+			self.janitor:Add(toolholdTrack, "Destroy")
+		end
+		-- Animación de disparo (solo si hay ID configurado)
 		local shootId = TaserConfig.shootAnimationId
 		if shootId and shootId ~= "" then
 			local shootAnim = Instance.new("Animation")

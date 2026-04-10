@@ -17,5 +17,6 @@ return {
 
 	-- Animación
 	shootAnimationId = "",       -- placeholder: asignar rbxassetid://... cuando esté listo
+	toolholdAnimationId = "",    -- placeholder: animación de apuntado NPC (loop durante ATTACKING)
 
 }
