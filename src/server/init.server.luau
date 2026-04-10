@@ -91,7 +91,7 @@ local function createTaserTool()
 			return game:GetService("InsertService"):LoadAsset(tonumber(modelId:match("%d+")))
 		end)
 		if success and result then
-			local toolAsset = result:FindFirstChildOfClass("Tool")
+			local toolAsset = result:FindFirstChildWhichIsA("Tool", true)
 			if toolAsset then
 				toolAsset.Name = "Taser"
 				toolAsset.CanBeDropped = false
@@ -99,9 +99,17 @@ local function createTaserTool()
 				result:Destroy()
 				return toolAsset
 			end
+			-- Asset cargó pero no contiene un Tool — listar hijos para diagnosticar
+			local children = {}
+			for _, child in ipairs(result:GetChildren()) do
+				table.insert(children, child.ClassName .. " '" .. child.Name .. "'")
+			end
+			warn("[TaserTool] Asset cargó pero no contiene Tool. Hijos: " .. table.concat(children, ", "))
 			result:Destroy()
+		else
+			warn("[TaserTool] InsertService:LoadAsset falló: " .. tostring(result))
 		end
-		warn("[TaserTool] No se pudo cargar el asset '" .. modelId .. "', usando modelo procedural")
+		warn("[TaserTool] Usando modelo procedural")
 	end
 
 	-- Fallback: modelo procedural
