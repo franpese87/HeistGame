@@ -21,6 +21,9 @@ return {
 		-- Pipeline: Distancia -> Cono -> Line of Sight
 		showVisionDebug = true,
 
+		-- Sistema de puertas (DoorService)
+		showDoorSweep = true,
+
 		-- Otros sistemas
 		showNoiseSpheres = true,
 		showNPCPaths = true,

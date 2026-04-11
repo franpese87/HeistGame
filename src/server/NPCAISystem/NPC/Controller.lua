@@ -16,6 +16,8 @@ local VisionSensor = require(script.Parent.Parent.Components.VisionSensor)
 local Combat = require(script.Parent.Parent.Components.Combat)
 local HearingSensor = require(script.Parent.Parent.Components.HearingSensor)
 local GeometryVersion = require(script.Parent.Parent.Parent.Services.GeometryVersion)
+local DoorService = require(script.Parent.Parent.Parent.Services.DoorService)
+local StunService = require(script.Parent.Parent.Parent.Services.StunService)
 local DebugConfig = require(script.Parent.Parent.Parent.Config.DebugConfig)
 local Visualizer = require(script.Parent.Parent.Debug.Visualizer)
 
@@ -26,7 +28,8 @@ local AIState = {
 	CHASING = "Chasing",
 	ATTACKING = "Attacking",
 	INVESTIGATING = "Investigating",
-	RETURNING = "Returning"
+	RETURNING = "Returning",
+	STUNNED = "Stunned",
 }
 
 -- Constantes
@@ -95,6 +98,9 @@ function Controller.new(pawn, navigationGraph, config)
 	-- Investigación (duración = tiempo total de observación en un nodo de patrulla)
 	self.investigationDuration = #self.observationAngles * self.observationTimePerAngle
 
+	-- Stun (portazo)
+	self.stunDuration = config.stunDuration or 3
+
 	-- Componentes (Sensores y Combate)
 	local npcInstance = pawn:GetInstance()
 	self.visionSensor = VisionSensor.new(npcInstance, config)
@@ -132,6 +138,9 @@ function Controller.new(pawn, navigationGraph, config)
 	self.currentPath = nil
 	self.currentPathIndex = 1
 	self.targetLastPosition = nil
+
+	-- Interacción con puertas
+	self.waitingForDoor = nil  -- doorModel que está abriendo
 	self.pathRecalcInterval = config.pathRecalcInterval or 1.5
 	self.lastPathCalcTime = 0
 
@@ -176,6 +185,7 @@ end
 function Controller:ClearPath()
 	self.currentPath = nil
 	self.currentPathIndex = 1
+	self.waitingForDoor = nil
 end
 
 function Controller:HasArrivedAt(position)
@@ -211,6 +221,12 @@ local HIGH_PRIORITY_STATES = {
 function Controller:Update(_deltaTime)
 	if not self.isActive or not self.pawn:IsAlive() then
 		self.isActive = false
+		return
+	end
+
+	-- Stunned: no procesar sensores ni lógica de estados (inconsciente)
+	if self.currentState == AIState.STUNNED then
+		self:UpdateStunned()
 		return
 	end
 
@@ -833,12 +849,34 @@ function Controller:FollowCurrentPath()
 		return
 	end
 
+	-- Esperando a que una puerta termine de abrirse
+	if self.waitingForDoor then
+		if DoorService.IsClosed(self.waitingForDoor) or DoorService.IsAnimating(self.waitingForDoor) then
+			self.pawn:StopMovement()
+			self.pawn:PlayAnimation("idle")
+			return
+		end
+		-- Puerta abierta: continuar
+		self.waitingForDoor = nil
+	end
+
 	if os.clock() - self.timeStartedMovingToNode > self.nodeTimeout then
 		self.currentPath = nil
 		return
 	end
 
 	local targetNode = self.currentPath[self.currentPathIndex]
+
+	-- Detectar puerta cerrada en el camino hacia el siguiente nodo
+	local doorInPath = self:CheckForDoorInPath(targetNode.position)
+	if doorInPath and DoorService.IsClosed(doorInPath) then
+		self.pawn:StopMovement()
+		self.pawn:PlayAnimation("idle")
+		self.waitingForDoor = doorInPath
+		DoorService.Open(doorInPath, self.pawn:GetPosition(), self.pawn:GetInstance())
+		return
+	end
+
 	self.pawn:MoveTo(targetNode.position)
 
 	if self:HasArrivedAt(targetNode.position) then
@@ -848,6 +886,23 @@ function Controller:FollowCurrentPath()
 			self.currentPath = nil
 		end
 	end
+end
+
+function Controller:CheckForDoorInPath(targetPosition)
+	local origin = self.pawn:GetPosition()
+	local direction = targetPosition - origin
+	local distance = direction.Magnitude
+
+	if distance < 0.5 then return nil end
+
+	local result = workspace:Raycast(origin, direction, self.raycastParams)
+	if not result then return nil end
+
+	-- Solo considerar hits que están entre el NPC y el nodo destino
+	local hitDistance = (result.Position - origin).Magnitude
+	if hitDistance > distance then return nil end
+
+	return DoorService.GetDoorFromPart(result.Instance)
 end
 
 -- ==============================================================================
@@ -1054,6 +1109,51 @@ function Controller:GetNearestPatrolNode()
 end
 
 -- ==============================================================================
+-- STUNNED (Portazo - aturdimiento por puerta)
+-- ==============================================================================
+
+function Controller:ApplyStun()
+	self:ChangeState(AIState.STUNNED)
+end
+
+function Controller:EnterStunned()
+	self.stunStartTime = os.clock()
+	self.pawn:StopMovement()
+	self.pawn:SetAutoRotate(false)
+	self.pawn:PlayAnimation("idle")
+
+	-- Inmovilizar via StunService (no usamos su timer, lo gestiona UpdateStunned)
+	local humanoid = self.pawn:GetHumanoid()
+	if humanoid then
+		StunService.Apply(humanoid, math.huge)
+	end
+
+	-- Limpiar debug visuals de sensores para que no queden congelados
+	-- (el knockback mueve al NPC pero Update no llama Scan en STUNNED)
+	self.visionSensor:ClearRangeCircle()
+	self.visionSensor:ClearConeBoundaries()
+	self.visionSensor:ClearLineOfSight()
+
+	self.target = nil
+	self.lastSeenPosition = nil
+	self:ClearPath()
+end
+
+function Controller:UpdateStunned()
+	if os.clock() - self.stunStartTime >= self.stunDuration then
+		self:ChangeState(AIState.RETURNING)
+	end
+end
+
+function Controller:ExitStunned()
+	local humanoid = self.pawn:GetHumanoid()
+	if humanoid then
+		StunService.Remove(humanoid)
+	end
+	self.pawn:SetAutoRotate(true)
+end
+
+-- ==============================================================================
 -- STATE MANAGEMENT
 -- ==============================================================================
 
@@ -1077,6 +1177,8 @@ function Controller:ChangeState(newState)
 	elseif self.currentState == AIState.ATTACKING then
 		-- Re-activar AutoRotate al salir de combate
 		self.pawn:SetAutoRotate(true)
+	elseif self.currentState == AIState.STUNNED then
+		self:ExitStunned()
 	end
 
 	local oldState = self.currentState
@@ -1105,6 +1207,8 @@ function Controller:ChangeState(newState)
 		self.pawn:SetAutoRotate(false)
 	elseif newState == AIState.RETURNING then
 		self:EnterReturning()
+	elseif newState == AIState.STUNNED then
+		self:EnterStunned()
 	end
 end
 

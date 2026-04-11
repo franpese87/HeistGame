@@ -34,6 +34,7 @@ end
 -- Constructor privado
 function Registry:_Initialize()
 	self.npcs = {}          -- { [id] = { pawn = Pawn, controller = Controller } }
+	self.instanceToId = {}  -- { [Instance] = id } reverse lookup
 	self.npcCount = 0
 	self.nextId = 1
 	self.isRunning = false
@@ -60,8 +61,9 @@ function Registry:RegisterNPC(pawn, controller)
 		registeredAt = os.clock()
 	}
 
-	-- Guardar referencia del ID en el controller para búsquedas inversas
+	-- Guardar referencias inversas
 	controller.registryId = id
+	self.instanceToId[pawn:GetInstance()] = id
 
 	self.npcCount = self.npcCount + 1
 
@@ -74,6 +76,7 @@ function Registry:UnregisterNPC(id)
 		return false
 	end
 
+	self.instanceToId[npcData.pawn:GetInstance()] = nil
 	self.npcs[id] = nil
 	self.npcCount = self.npcCount - 1
 
@@ -101,6 +104,14 @@ end
 
 function Registry:GetNPCById(id)
 	return self.npcs[id]
+end
+
+function Registry:GetNPCByInstance(npcInstance)
+	local id = self.instanceToId[npcInstance]
+	if id then
+		return self.npcs[id]
+	end
+	return nil
 end
 
 function Registry:GetAllNPCs()
@@ -243,6 +254,7 @@ function Registry:DestroyAll()
 		end
 	end
 	self.npcs = {}
+	self.instanceToId = {}
 	self.npcCount = 0
 end
 

@@ -49,6 +49,7 @@ local STATE_VISUALS = {
 	["Investigating"] = {emoji = "❓", text = "INVESTIGATING", color = Color3.fromRGB(255, 165, 0)},
 	["Returning"] = {emoji = "🔄", text = "RETURNING", color = Color3.fromRGB(255, 255, 0)},
 	["Alerted"] = {emoji = "❗", text = "ALERTED", color = Color3.fromRGB(255, 255, 255)},
+	["Stunned"] = {emoji = "💫", text = "STUNNED", color = Color3.fromRGB(180, 80, 255)},
 }
 
 -- ==============================================================================
