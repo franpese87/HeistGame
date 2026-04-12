@@ -9,6 +9,8 @@
 	3. Reiniciar Studio
 ]]
 
+local CollectionService = game:GetService("CollectionService")
+
 local ZONES_FOLDER_NAME = "NodeZones"
 local NODES_FOLDER_NAME = "NavigationNodes"
 local DEFAULT_SPACING = 2
@@ -17,13 +19,8 @@ local DEFAULT_SPACING = 2
 local MAX_CONNECTION_DISTANCE = 20
 local MAX_CONNECTIONS_PER_NODE = 8
 
--- Colores por piso (nodos caminables)
-local FLOOR_COLORS = {
-	[0] = Color3.fromRGB(0, 255, 0),
-	[1] = Color3.fromRGB(0, 150, 255),
-	[2] = Color3.fromRGB(255, 150, 0),
-	[3] = Color3.fromRGB(255, 0, 150),
-}
+-- Color para nodos caminables
+local WALKABLE_COLOR = Color3.fromRGB(0, 255, 0)
 
 -- Color para nodos NO caminables (rojo semi-transparente)
 local NON_WALKABLE_COLOR = Color3.fromRGB(255, 50, 50)
@@ -32,10 +29,6 @@ local NON_WALKABLE_TRANSPARENCY = 0.7
 -- ============================================================================
 -- LÓGICA DE GENERACIÓN (copiada de NodeGenerator)
 -- ============================================================================
-
-local function getFloorColor(floor)
-	return FLOOR_COLORS[floor] or Color3.fromRGB(150, 150, 150)
-end
 
 local function getOrCreateFloorFolder(nodesRoot, floor)
 	local folderName = "Floor_" .. floor
@@ -182,11 +175,11 @@ local function generateNodesInZone(zonePart, globalSpacing, nodesRoot, zonesFold
 	local startIndex = countExistingNodes(floorFolder)
 
 	-- Lista de elementos a ignorar en el chequeo de colisión
-	-- Incluir carpeta Doors para que los DoorParts no afecten la walkability
-	local doorsFolder = workspace:FindFirstChild("Doors")
 	local ignoreList = {nodesRoot, zonesFolder}
-	if doorsFolder then
-		table.insert(ignoreList, doorsFolder)
+
+	-- Filtramos todas las instancias de puerta para hacer caminable la zona en la que esta aparece.
+	for _, door in ipairs(CollectionService:GetTagged("Door")) do
+		table.insert(ignoreList, door)
 	end
 
 	local walkableCount = 0
@@ -217,7 +210,7 @@ local function generateNodesInZone(zonePart, globalSpacing, nodesRoot, zonesFold
 			node:SetAttribute("walkable", isWalkable)
 
 			if isWalkable then
-				node.Color = getFloorColor(floor)
+				node.Color = WALKABLE_COLOR
 				node.Transparency = 0.85
 				walkableCount = walkableCount + 1
 			else
