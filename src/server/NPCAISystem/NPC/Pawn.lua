@@ -360,6 +360,69 @@ function Pawn:UpdateStateIndicator(stateName)
 end
 
 -- ==============================================================================
+-- INDICADOR DE ALERTA ("!" animado sobre la cabeza)
+-- ==============================================================================
+
+function Pawn:ShowAlertIndicator()
+	self:ClearAlertIndicator()
+
+	local head = self.instance:FindFirstChild("Head")
+	if not head then return end
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "AlertIndicator"
+	billboard.Size = UDim2.fromScale(2, 2)
+	billboard.StudsOffset = Vector3.new(0, 0, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Adornee = head
+	billboard.Parent = head
+
+	local label = Instance.new("TextLabel")
+	label.Name = "ExclamationMark"
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = "!"
+	label.TextColor3 = Color3.fromRGB(255, 50, 50)
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.TextTransparency = 1
+	label.Parent = billboard
+
+	self.alertIndicator = billboard
+
+	-- Animacion: sube + fadein
+	local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+	local positionTween = TweenService:Create(billboard, tweenInfo, {StudsOffset = Vector3.new(0, 2, 0)})
+	local fadeinTween = TweenService:Create(label, tweenInfo, {TextTransparency = 0})
+	positionTween:Play()
+	fadeinTween:Play()
+end
+
+function Pawn:ClearAlertIndicator()
+	if not self.alertIndicator then return end
+
+	local label = self.alertIndicator:FindFirstChild("ExclamationMark")
+	if label then
+		local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		local positionTween = TweenService:Create(self.alertIndicator, tweenInfo, {StudsOffset = Vector3.new(0, 2.5, 0)})
+		local fadeoutTween = TweenService:Create(label, tweenInfo, {TextTransparency = 1})
+		positionTween:Play()
+		fadeoutTween:Play()
+
+		local indicator = self.alertIndicator
+		fadeoutTween.Completed:Connect(function()
+			if indicator and indicator.Parent then
+				indicator:Destroy()
+			end
+		end)
+	else
+		self.alertIndicator:Destroy()
+	end
+
+	self.alertIndicator = nil
+end
+
+-- ==============================================================================
 -- ESTADO Y UTILIDADES
 -- ==============================================================================
 

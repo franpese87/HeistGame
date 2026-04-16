@@ -263,7 +263,6 @@ end
 	Retorna: tabla con { npc, pawn, controller, id, config } por cada NPC
 ]]
 function Factory.SpawnAllNPCs(template, graph, npcSpawnList, baseConfig)
-	local Visualizer = require(script.Parent.Debug.Visualizer)
 	local isStudio = game:GetService("RunService"):IsStudio()
 
 	local spawnedNPCs = {}
@@ -301,7 +300,7 @@ function Factory.SpawnAllNPCs(template, graph, npcSpawnList, baseConfig)
 			-- Activar debug visual (solo en Studio)
 			if isStudio then
 				local DebugConfig = require(script.Parent.Parent.Config.DebugConfig)
-				Visualizer.EnableNPCDebug(controller, {
+				controller:EnableDebug({
 					showRaycast = DebugConfig.visuals.showVisionRays,
 					raycastDuration = 0.1,
 					showPath = DebugConfig.visuals.showNPCPaths,
@@ -413,7 +412,6 @@ end
 	Retorna: tabla con { npc, pawn, controller, id, config } por cada NPC inicializado.
 ]]
 function Factory.InitializeWorldNPCs(graph, baseConfig)
-	local Visualizer = require(script.Parent.Debug.Visualizer)
 	local isStudio = game:GetService("RunService"):IsStudio()
 
 	local taggedNPCs = CollectionService:GetTagged("NPC")
@@ -427,7 +425,7 @@ function Factory.InitializeWorldNPCs(graph, baseConfig)
 			-- Activar debug visual (solo en Studio)
 			if isStudio then
 				local DebugConfig = require(script.Parent.Parent.Config.DebugConfig)
-				Visualizer.EnableNPCDebug(result.controller, {
+				result.controller:EnableDebug({
 					showRaycast = DebugConfig.visuals.showVisionRays,
 					raycastDuration = 0.1,
 					showPath = DebugConfig.visuals.showNPCPaths,
