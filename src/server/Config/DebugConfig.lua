@@ -10,7 +10,7 @@ return {
 
 	-- Elementos a visualizar
 	showNodes = true,
-	showCells = false,
+	showCells = true,
 	showConnections = false,
 
 	-- ==============================================================================

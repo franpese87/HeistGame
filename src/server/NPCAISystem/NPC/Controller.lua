@@ -101,6 +101,10 @@ function Controller.new(pawn, navigationGraph, config)
 	-- Stun (portazo)
 	self.stunDuration = config.stunDuration or 3
 
+	-- Estados configurables (sandbox/testing)
+	self.allowedStates = config.allowedStates -- set o nil (nil = todos permitidos)
+	self.disableSenses = config.disableSenses or false
+
 	-- Componentes (Sensores y Combate)
 	local npcInstance = pawn:GetInstance()
 	self.visionSensor = VisionSensor.new(npcInstance, config)
@@ -112,8 +116,25 @@ function Controller.new(pawn, navigationGraph, config)
 		self.visionSensor:SetDebug(true)
 	end
 
-	-- Estado general
-	self.currentState = AIState.PATROLLING
+	-- Estado general: initialState configurable con validación
+	local requestedInitial = config.initialState
+	local validInitial = false
+	if requestedInitial then
+		for _, stateName in pairs(AIState) do
+			if stateName == requestedInitial then
+				self.currentState = stateName
+				validInitial = true
+				break
+			end
+		end
+	end
+	if not validInitial then
+		if requestedInitial and requestedInitial ~= "Patrolling" then
+			warn("[Controller] " .. pawn:GetName() .. ": initialState '"
+				.. tostring(requestedInitial) .. "' inválido, usando Patrolling")
+		end
+		self.currentState = AIState.PATROLLING
+	end
 	self.isActive = true
 	self.stateStartTime = os.clock()
 
@@ -143,6 +164,8 @@ function Controller.new(pawn, navigationGraph, config)
 	self.waitingForDoor = nil  -- doorModel que está abriendo
 	self.pathRecalcInterval = config.pathRecalcInterval or 1.5
 	self.lastPathCalcTime = 0
+	self.lastPathFailTime = 0       -- throttle: evita recalcular A* a 30fps cuando falla
+	self.pathFailCooldown = 0.3     -- segundos mínimos entre reintentos tras fallo
 
 	-- Debug logging
 	local loggingConfig = config.logging or DebugConfig.logging or {}
@@ -230,10 +253,13 @@ function Controller:Update(_deltaTime)
 		return
 	end
 
-	-- Throttle sensores: cada frame en combate, cada 2 frames en estados pasivos
-	self.senseFrameCounter = self.senseFrameCounter + 1
-	if HIGH_PRIORITY_STATES[self.currentState] or self.senseFrameCounter % 2 == 0 then
-		self:UpdateSenses()
+	-- Sensores desactivables para sandbox/testing
+	if not self.disableSenses then
+		-- Throttle sensores: cada frame en combate, cada 2 frames en estados pasivos
+		self.senseFrameCounter = self.senseFrameCounter + 1
+		if HIGH_PRIORITY_STATES[self.currentState] or self.senseFrameCounter % 2 == 0 then
+			self:UpdateSenses()
+		end
 	end
 
 	if self.currentState == AIState.PATROLLING then
@@ -761,12 +787,14 @@ function Controller:UpdateChasing()
 end
 
 function Controller:NavigateToTarget(targetRoot)
-	local distance = (self.pawn:GetPosition() - targetRoot.Position).Magnitude
+	local npcPos = self.pawn:GetPosition()
+	local targetPos = targetRoot.Position
+	local distance = (npcPos - targetPos).Magnitude
 
 	-- Acercamiento directo solo cuando está lo suficientemente cerca para atacar
 	if distance <= self.directApproachDistance then
 		self.currentPath = nil
-		self.pawn:MoveTo(targetRoot.Position)
+		self.pawn:MoveTo(targetPos)
 	else
 		-- Siempre usar grafo para navegación a larga distancia
 		self:ChaseUsingGraph(targetRoot)
@@ -778,6 +806,10 @@ function Controller:ChaseUsingGraph(targetRoot)
 	local currentTime = os.clock()
 
 	if not self.currentPath or #self.currentPath == 0 then
+		-- Throttle: no reintentar A* a 30fps si el último intento falló recientemente
+		if currentTime - self.lastPathFailTime < self.pathFailCooldown then
+			return
+		end
 		self:CalculateGraphPathToPosition(targetPosition)
 		self.targetLastPosition = targetPosition
 		self.lastPathCalcTime = currentTime
@@ -816,6 +848,22 @@ function Controller:CalculateGraphPathToPosition(targetPosition)
 
 	local path = self.graph:GetPathBetweenNodes(startNode, endNode)
 
+	-- Fallback: si A* falla con el nodo inicial, probar candidatos alternativos cercanos al NPC.
+	-- Mitiga el caso donde el spatial hash devuelve un nodo de un subgrafo desconectado
+	-- (p.ej. nodo al otro lado de una pared) en vez del nodo gateway de la puerta.
+	if not path then
+		local startCandidates = self.graph:GetNearestNodeCandidates(npcPos, 5)
+		for _, candidate in ipairs(startCandidates) do
+			if candidate.name ~= startNode.name and candidate.name ~= endNode.name then
+				local fallbackPath = self.graph:GetPathBetweenNodes(candidate, endNode)
+				if fallbackPath then
+					path = fallbackPath
+					break
+				end
+			end
+		end
+	end
+
 	if path and #path > 0 then
 		-- Aplicar path smoothing si está habilitado
 		if self.enablePathSmoothing then
@@ -839,6 +887,7 @@ function Controller:CalculateGraphPathToPosition(targetPosition)
 			})
 		end
 	else
+		self.lastPathFailTime = os.clock()
 		self.currentPath = nil
 	end
 end
@@ -1159,6 +1208,11 @@ end
 
 function Controller:ChangeState(newState)
 	if self.currentState == newState then return end
+
+	-- Verificar si el estado está permitido (sandbox/testing)
+	if self.allowedStates and not self.allowedStates[newState] then
+		return
+	end
 
 	-- EXIT
 	if self.currentState == AIState.OBSERVING then

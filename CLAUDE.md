@@ -95,10 +95,16 @@ src/
 - **Client**: Minimal - entry point and debug tools only
 
 ### NPC AI State Machine
-The AI uses 6 states with defined transitions:
+The AI uses 8 states with defined transitions:
 - `PATROLLING` → `OBSERVING` → `PATROLLING` (patrol loop)
-- `PATROLLING/OBSERVING` → `CHASING` → `ATTACKING` (combat)
+- `PATROLLING/OBSERVING` → `ALERTED` → `CHASING` → `ATTACKING` (combat)
 - `CHASING` → `INVESTIGATING` → `RETURNING` → `PATROLLING` (target lost)
+- Any state → `STUNNED` → resumes previous state (door knockback, etc.)
+
+**Per-NPC state configuration** (via Roblox Attributes on model):
+- `initialState` (string): FSM starting state, default `"Patrolling"`
+- `allowedStates` (string): comma-separated whitelist — transitions to unlisted states are silently blocked
+- `disableSenses` (bool): bypasses vision/hearing update entirely (useful for sandbox testing)
 
 ### Component-Based Sensors
 - **VisionSensor**: Raycasting with vision cone, detection accumulator, coyote time
@@ -107,8 +113,13 @@ The AI uses 6 states with defined transitions:
 
 ### Navigation System (2.5D)
 - A* pathfinding algorithm
-- Spatial hashing (2D grid per floor) for O(1) nearest-node lookup
-- Multi-floor support via Floor_0, Floor_1, etc. folders
+- **3D spatial hash** (`spatialGrid3D["x,y,z"]`) for O(1) nearest-node lookup
+  - Cell key: `math.floor(pos / cellSize)` per axis — default 16×4×14 studs
+  - `cellSizeY=4` separates stacked floors without fragmenting a single floor
+  - Handles same-height zones (separate X/Z buckets) AND stacked floors (separate Y buckets)
+  - `SearchGrid3D` searches 3×3×3 neighborhood (27 cells), uses full 3D distance
+  - `floorYRanges` still computed from node data for `GetFloorFromPosition`
+- Multi-floor support via `Floor_X_ZoneName` folders (one per zone per floor)
 - Node connections validated via raycast
 
 ## Key Files to Understand
@@ -125,19 +136,28 @@ The AI uses 6 states with defined transitions:
 
 NPCs use layered configuration:
 1. `NPCBaseConfig.lua` - Base defaults for all NPCs
-2. `NPCSpawnList.lua` - Per-NPC overrides
+2. Roblox Attributes on each NPC model - Per-NPC overrides (any key from NPCBaseConfig)
 
-Key configurable values:
+`NPCSpawnList.lua` is **deprecated** — kept for reference and programmatic spawning only.
+NPCs are now placed directly in workspace with tag `"NPC"` and discovered via CollectionService.
+
+Key configurable values (NPCBaseConfig defaults, overridable per-model via Attributes):
 - `detectionRange`, `attackRange`, `loseTargetTime`
 - `patrolSpeed`, `chaseSpeed`
 - `observationConeAngle`, `observationAngles`
-- Patrol routes via node names
+- `initialState`, `allowedStates`, `disableSenses` — FSM sandbox controls
+- `enablePathSmoothing`, `agentRadius` — navigation quality
+- `patrolRoute` (string Attribute): comma-separated node names, e.g. `"Node_0_1, Node_0_5"`
+- `snapToFirstPatrolNode` (bool Attribute): teleport NPC to first patrol node on init
 
 ## Conventions
 
 - File naming: `*.lua` for modules, `*.client.luau` / `*.server.luau` for scripts
-- Navigation nodes organized in `NavigationNodes/Floor_X` folders
-- NPCs tagged via CollectionService for detection
+- Navigation nodes organized in `NavigationNodes/Floor_X_ZoneName` folders (one per zone/room per floor)
+  - Folder name format must start with `Floor_X` (integer) for the graph loader to detect floor number
+  - Zone name is free-form (matches the zone part name in `NodeZones`)
+- NPCs placed in workspace with CollectionService tag `"NPC"`, R15 rigs only
+- NPC configuration via Roblox Attributes on the model (no Lua edits required)
 - Debug visualization controlled via `DebugConfig.lua`
 
 ## Update Loop
@@ -151,12 +171,15 @@ NPCManager runs at 30 fps:
 
 - All game logic runs server-side (FilteringEnabled)
 - NoiseService uses Signal pattern for efficient global noise detection
-- Spatial hash cell sizes: 16x14 studs (configurable)
-- **Maximum 8 connections per navigation node** (updated from 6 for complete grid connectivity)
+- **3D spatial hash cell sizes: 16×4×14 studs** (X×Y×Z, configurable via `cellSizeX/Y/Z`)
+  - `cellSizeY=4` is the vertical resolution — must be < floor separation, > intra-floor Y variance
+- **Maximum 8 connections per navigation node** (4 cardinal + 4 diagonal)
 - All components use Janitor for automatic memory cleanup
 - **NodeGenerator plugin creates persistent Beams** in `NavigationNodes/_ConnectionBeams`
   - Beams are reused by debug system when both `showNodes` and `showConnections` are enabled
   - Auto-cleaned when either setting is disabled
+- **NPCs are R15 only** — Motor6Ds: `Head.Neck` (head rotation) + `UpperTorso.Waist` (torso rotation)
+  - Animation IDs come from `AnimationRegistry.R15_DEFAULT` in `src/shared/Animation/`
 
 ## Recent Implementation Changes
 
@@ -205,6 +228,37 @@ NPCManager runs at 30 fps:
   - `NavigationGraph.lua`: Added `SmoothPath()` function
   - `Controller.lua`: Integrated smoothing after A* path calculation
   - `NPCBaseConfig.lua`: Added configuration options
+
+### 3D Spatial Hash for Navigation Graph (2026-04-12)
+- **Replaced 2D-per-floor hash with unified 3D hash** (`spatialGrid3D["x,y,z"]`)
+  - Previous approach used separate 2D grids per floor — failed when multiple zones shared the same physical height
+  - New approach: single grid keyed by `(X/cellSizeX, Y/cellSizeY, Z/cellSizeZ)` integer buckets
+  - `SearchGrid3D` searches 27-cell 3×3×3 neighborhood, returns nearest node by 3D Euclidean distance
+  - Correctly handles same-height zones (different X/Z buckets) AND stacked floors (different Y buckets)
+  - `cellSizeY=4` default — configurable via `NavigationGraph.new({ cellSizeY = N })`
+- **`floorYRanges`** still computed from node data for `GetFloorFromPosition` (external use)
+- **Files modified**: `NavigationGraph.lua`, `Visualizer.lua` (`DrawCells`, `PrintSystemReport`)
+
+### World-Placed NPCs + Configurable FSM + R15 (2026-04-12)
+- **NPCs placed directly in workspace** — no more template cloning from ServerStorage
+  - Discovery via CollectionService tag `"NPC"` (`Factory.InitializeWorldNPCs`)
+  - Configuration read from Roblox Attributes on each model (`Factory._ReadNPCConfig`)
+  - `NPCSpawnList.lua` deprecated (kept for programmatic spawning reference)
+- **Configurable FSM per NPC** via Attributes:
+  - `allowedStates`: comma-separated whitelist — `ChangeState()` silently blocks unlisted transitions
+  - `initialState`: FSM starting state (validated, falls back to Patrolling with warn)
+  - `disableSenses`: skips `UpdateSenses()` entirely when true
+- **R15 migration**: Motor6Ds now `Head.Neck` + `UpperTorso.Waist` (was `Torso.Neck` + `HumanoidRootPart.RootJoint`)
+  - Animation IDs from shared `AnimationRegistry.R15_DEFAULT`
+- **Files modified**: `Factory.lua`, `Controller.lua`, `Pawn.lua`, `NPCBaseConfig.lua`, `init.server.luau`
+
+### NodeGenerator Plugin — Zone-per-Folder (2026-04-12)
+- **Each NodeZone gets its own subfolder** `Floor_X_ZoneName` in NavigationNodes
+  - Previously all zones with the same `floor` Attribute shared a single `Floor_X` folder
+  - New folder name format preserves floor number at the start for regex compatibility
+- **Global node counter per floor** (`nodeCountByFloor`) passed across zones — guarantees unique node names even when two zones share the same floor number
+- **Fixed `autoConnectNodes` accumulation bug**: `nodesByFloor[floor] = {}` → `nodesByFloor[floor] = nodesByFloor[floor] or {}` so multi-zone floors accumulate all nodes for connection
+- **Files modified**: `NodeGeneratorPlugin.server.lua`
 
 ### VisionSensor Refactoring (2026-01-12)
 - **Simplified target detection to Players only**

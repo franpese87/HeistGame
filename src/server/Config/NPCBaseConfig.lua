@@ -72,4 +72,9 @@ return {
 
 	-- Indicador visual de estado (debug)
 	stateIndicatorOffset = 4,
+
+	-- Configuración de estados (sandbox/testing)
+	initialState = "Patrolling",     -- Estado inicial de la FSM
+	allowedStates = "",              -- Estados permitidos (vacío = todos). Ej: "Patrolling,Observing"
+	disableSenses = false,           -- Desactiva visión y oído (para testing aislado)
 }

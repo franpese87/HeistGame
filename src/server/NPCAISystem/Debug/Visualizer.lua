@@ -79,79 +79,82 @@ function Visualizer.DrawNodes(graph, options)
 end
 
 -- ==============================================================================
--- VISUALIZACIÓN DE CELDAS (SPATIAL HASH 2D POR PISO)
+-- VISUALIZACIÓN DE CELDAS (SPATIAL HASH 3D)
 -- ==============================================================================
 
-function Visualizer.DrawCells(graph, options)
-	if not graph.spatialGrids or not next(graph.spatialGrids) then
-		warn("Visualizer.DrawCells: No hay spatial grids para dibujar")
+function Visualizer.DrawCells(graph, _options)
+	if not graph.spatialGrid3D or not next(graph.spatialGrid3D) then
+		warn("Visualizer.DrawCells: No hay spatial grid 3D para dibujar")
 		return
 	end
 
-	options = options or {}
-	local cellHeight = options.cellHeight or graph.floorHeight or 10
-
-	-- Colores por piso
-	local floorColors = {
-		[0] = Color3.fromRGB(100, 200, 255),  -- Azul
-		[1] = Color3.fromRGB(100, 255, 100),  -- Verde
-		[2] = Color3.fromRGB(255, 200, 100),  -- Naranja
-		[-1] = Color3.fromRGB(200, 100, 255), -- Morado
-	}
-	local defaultColor = Color3.fromRGB(150, 150, 150)
+	-- Color dinámico por número de piso: hue distribuido uniformemente en HSV
+	-- Funciona para cualquier número de piso sin tabla hardcodeada
+	local colorCache = {}
+	local function getFloorColor(floor)
+		if colorCache[floor] then
+			return colorCache[floor]
+		end
+		-- Distribuye hues usando proporción áurea para máxima separación visual
+		local hue = ((floor * 0.618033988) % 1 + 1) % 1
+		local color = Color3.fromHSV(hue, 0.65, 0.95)
+		colorCache[floor] = color
+		return color
+	end
 
 	local folder = CreateDebugFolder("DEBUG_Cells")
-	local count = 0
-
-	-- Iterar por cada piso
-	for floor, grid in pairs(graph.spatialGrids) do
-		local floorFolder = Instance.new("Folder")
-		floorFolder.Name = "Floor_" .. floor
-		floorFolder.Parent = folder
-
-		local color = floorColors[floor] or defaultColor
-
-		-- Calcular Y base para este piso
-		local floorBaseY = (graph.floorBaseY or 0) + floor * (graph.floorHeight or 10)
-
-		for cellKey, nodes in pairs(grid) do
-			-- Parsear índices de celda desde la key (ahora solo X,Z)
-			local coords = string.split(cellKey, ",")
-			local cellX = tonumber(coords[1])
-			local cellZ = tonumber(coords[2])
-
-			-- Calcular posición central de la celda 2D
-			local centerPos = Vector3.new(
-				cellX * graph.cellSizeX + graph.cellSizeX / 2,
-				floorBaseY + cellHeight / 2,
-				cellZ * graph.cellSizeZ + graph.cellSizeZ / 2
-			)
-
-			local cellSize = Vector3.new(graph.cellSizeX, cellHeight, graph.cellSizeZ)
-
-			-- Crear Part para la celda
-			local cellPart = Instance.new("Part")
-			cellPart.Name = "Cell_F" .. floor .. "_" .. cellKey
-			cellPart.Size = cellSize
-			cellPart.Position = centerPos
-			cellPart.Anchored = true
-			cellPart.CanCollide = false
-			cellPart.CanQuery = false
-			cellPart.Color = color
-			cellPart.Material = Enum.Material.SmoothPlastic
-
-			cellPart.Transparency = 1
-			local selectionBox = Instance.new("SelectionBox")
-			selectionBox.Adornee = cellPart
-			selectionBox.LineThickness = 0.05
-			selectionBox.Color3 = color
-			selectionBox.Transparency = 0.3
-			selectionBox.Parent = cellPart
-
-			cellPart.Parent = floorFolder
-
-			count = count + 1
+	-- Subcarpeta por piso para organización en el explorador de Studio
+	local floorFolders = {}
+	local function getFloorFolder(floor)
+		if floorFolders[floor] then
+			return floorFolders[floor]
 		end
+		local f = Instance.new("Folder")
+		f.Name = "Floor_" .. floor
+		f.Parent = folder
+		floorFolders[floor] = f
+		return f
+	end
+
+	for cellKey, nodes in pairs(graph.spatialGrid3D) do
+		-- Parsear índices 3D desde la key "cellX,cellY,cellZ"
+		local coords = string.split(cellKey, ",")
+		local cellX = tonumber(coords[1])
+		local cellY = tonumber(coords[2])
+		local cellZ = tonumber(coords[3])
+
+		-- Calcular posición central de la celda 3D
+		local centerPos = Vector3.new(
+			cellX * graph.cellSizeX + graph.cellSizeX / 2,
+			cellY * graph.cellSizeY + graph.cellSizeY / 2,
+			cellZ * graph.cellSizeZ + graph.cellSizeZ / 2
+		)
+
+		local cellSize = Vector3.new(graph.cellSizeX, graph.cellSizeY, graph.cellSizeZ)
+
+		-- Inferir piso del primer nodo de la celda y obtener su color
+		local floor = nodes[1] and nodes[1].metadata and nodes[1].metadata.floor or 0
+		local color = getFloorColor(floor)
+
+		local cellPart = Instance.new("Part")
+		cellPart.Name = "Cell_" .. cellKey
+		cellPart.Size = cellSize
+		cellPart.Position = centerPos
+		cellPart.Anchored = true
+		cellPart.CanCollide = false
+		cellPart.CanQuery = false
+		cellPart.Color = color
+		cellPart.Material = Enum.Material.SmoothPlastic
+		cellPart.Transparency = 1
+
+		local selectionBox = Instance.new("SelectionBox")
+		selectionBox.Adornee = cellPart
+		selectionBox.LineThickness = 0.05
+		selectionBox.Color3 = color
+		selectionBox.Transparency = 0.3
+		selectionBox.Parent = cellPart
+
+		cellPart.Parent = getFloorFolder(floor)
 	end
 
 	return folder
@@ -620,25 +623,13 @@ function Visualizer.PrintSystemReport(npcManager, navGraph, spawnedNPCs, baseCon
 	print("Total de nodos: " .. navGraph:GetNodesCount())
 	print("Total de conexiones: " .. navGraph:GetConnectionCount())
 
-	-- Estadísticas del spatial hash 2D (por piso)
-	if navGraph.spatialGrids and next(navGraph.spatialGrids) then
-		local floorCount = 0
-		local totalCells = 0
-		local totalNodesInCells = 0
-
-		for _, grid in pairs(navGraph.spatialGrids) do
-			floorCount = floorCount + 1
-			for _, nodes in pairs(grid) do
-				totalCells = totalCells + 1
-				totalNodesInCells = totalNodesInCells + #nodes
-			end
-		end
-
-		print("Spatial Hash 2D:")
-		print("   Pisos con grids: " .. floorCount)
-		print("   Celdas ocupadas (total): " .. totalCells)
-		if totalCells > 0 then
-			print("   Nodos por celda (promedio): " .. string.format("%.1f", totalNodesInCells / totalCells))
+	-- Estadísticas del spatial hash 3D
+	if navGraph.spatialGrid3D and next(navGraph.spatialGrid3D) then
+		local hashStats = navGraph:GetSpatialHashStats()
+		print("Spatial Hash 3D:")
+		print("   Celdas ocupadas: " .. hashStats.totalCells)
+		if hashStats.totalCells > 0 then
+			print("   Nodos por celda (promedio): " .. string.format("%.1f", hashStats.avgNodesPerCell))
 		end
 	end
 

@@ -30,8 +30,9 @@ local NON_WALKABLE_TRANSPARENCY = 0.7
 -- LÓGICA DE GENERACIÓN (copiada de NodeGenerator)
 -- ============================================================================
 
-local function getOrCreateFloorFolder(nodesRoot, floor)
-	local folderName = "Floor_" .. floor
+-- Crea o reutiliza una carpeta Floor_X_ZoneName por zona
+local function getOrCreateZoneFolder(nodesRoot, floor, zoneName)
+	local folderName = "Floor_" .. floor .. "_" .. zoneName
 	local existing = nodesRoot:FindFirstChild(folderName)
 	if existing then
 		return existing
@@ -41,16 +42,6 @@ local function getOrCreateFloorFolder(nodesRoot, floor)
 	folder.Name = folderName
 	folder.Parent = nodesRoot
 	return folder
-end
-
-local function countExistingNodes(floorFolder)
-	local count = 0
-	for _, child in ipairs(floorFolder:GetChildren()) do
-		if child:IsA("BasePart") then
-			count = count + 1
-		end
-	end
-	return count
 end
 
 local NODE_SIZE = 1 -- Tamaño del nodo (cubo 1x1x1)
@@ -150,7 +141,8 @@ local function calculateGridParams(usableSize, desiredSpacing)
 	return numNodes, actualSpacing
 end
 
-local function generateNodesInZone(zonePart, globalSpacing, nodesRoot, zonesFolder, agentRadius)
+-- nodeCountByFloor: tabla { [floor] = count } para mantener índices únicos por piso entre zonas
+local function generateNodesInZone(zonePart, globalSpacing, nodesRoot, zonesFolder, agentRadius, nodeCountByFloor)
 	local pos = zonePart.Position
 	local size = zonePart.Size
 
@@ -171,8 +163,10 @@ local function generateNodesInZone(zonePart, globalSpacing, nodesRoot, zonesFold
 	local numNodesX, spacingX = calculateGridParams(usableSizeX, spacing)
 	local numNodesZ, spacingZ = calculateGridParams(usableSizeZ, spacing)
 
-	local floorFolder = getOrCreateFloorFolder(nodesRoot, floor)
-	local startIndex = countExistingNodes(floorFolder)
+	-- Cada zona obtiene su propia subcarpeta Floor_X_ZoneName
+	local zoneFolder = getOrCreateZoneFolder(nodesRoot, floor, zonePart.Name)
+	-- startIndex global por piso garantiza nombres únicos entre zonas del mismo piso
+	local startIndex = nodeCountByFloor[floor] or 0
 
 	-- Lista de elementos a ignorar en el chequeo de colisión
 	local ignoreList = {nodesRoot, zonesFolder}
@@ -180,6 +174,11 @@ local function generateNodesInZone(zonePart, globalSpacing, nodesRoot, zonesFold
 	-- Filtramos todas las instancias de puerta para hacer caminable la zona en la que esta aparece.
 	for _, door in ipairs(CollectionService:GetTagged("Door")) do
 		table.insert(ignoreList, door)
+	end
+
+	-- Filtramos todas las instancias de NPC para hacer caminable la zona en la que este aparece.
+	for _, npc in ipairs(CollectionService:GetTagged("NPC")) do
+		table.insert(ignoreList, npc)
 	end
 
 	local walkableCount = 0
@@ -219,9 +218,12 @@ local function generateNodesInZone(zonePart, globalSpacing, nodesRoot, zonesFold
 				nonWalkableCount = nonWalkableCount + 1
 			end
 
-			node.Parent = floorFolder
+			node.Parent = zoneFolder
 		end
 	end
+
+	-- Actualizar contador global del piso para que la siguiente zona use índices únicos
+	nodeCountByFloor[floor] = startIndex + totalNodes
 
 	return walkableCount, nonWalkableCount, numNodesX, numNodesZ
 end
@@ -272,7 +274,8 @@ local function autoConnectNodes(nodesRoot)
 		if floorFolder:IsA("Folder") then
 			local floorNumber = tonumber(string.match(floorFolder.Name, "Floor_(%-?%d+)"))
 			if floorNumber then
-				nodesByFloor[floorNumber] = {}
+				-- Usar "or {}" para acumular nodos de múltiples zonas del mismo piso
+				nodesByFloor[floorNumber] = nodesByFloor[floorNumber] or {}
 				for _, node in ipairs(floorFolder:GetChildren()) do
 					-- Solo incluir nodos marcados como caminables
 					if node:IsA("BasePart") and node:GetAttribute("walkable") == true then
@@ -341,6 +344,17 @@ local function generateNodes(spacing, agentRadius)
 		return nil, "No hay Parts en " .. ZONES_FOLDER_NAME
 	end
 
+	-- Validar que todas las zonas tienen el atributo 'floor' definido
+	local missingFloor = {}
+	for _, zone in ipairs(zones) do
+		if zone:GetAttribute("floor") == nil then
+			table.insert(missingFloor, zone.Name)
+		end
+	end
+	if #missingFloor > 0 then
+		warn("[NodeGenerator] Zonas sin atributo 'floor' (usarán 0): " .. table.concat(missingFloor, ", "))
+	end
+
 	clearNodes()
 
 	local nodesRoot = Instance.new("Folder")
@@ -350,9 +364,11 @@ local function generateNodes(spacing, agentRadius)
 	local totalWalkable = 0
 	local totalNonWalkable = 0
 	local zoneResults = {}
+	-- Contador global de nodos por piso — garantiza nombres únicos entre zonas del mismo piso
+	local nodeCountByFloor = {}
 
 	for _, zonePart in ipairs(zones) do
-		local walkable, nonWalkable, nx, nz = generateNodesInZone(zonePart, spacing, nodesRoot, zonesFolder, agentRadius)
+		local walkable, nonWalkable, nx, nz = generateNodesInZone(zonePart, spacing, nodesRoot, zonesFolder, agentRadius, nodeCountByFloor)
 		totalWalkable = totalWalkable + walkable
 		totalNonWalkable = totalNonWalkable + nonWalkable
 		table.insert(zoneResults, {
@@ -372,7 +388,8 @@ local function generateNodes(spacing, agentRadius)
 		totalNodes = totalWalkable + totalNonWalkable,
 		totalConnections = totalConnections,
 		zonesCount = #zones,
-		zones = zoneResults
+		zones = zoneResults,
+		missingFloor = missingFloor,
 	}
 end
 
@@ -697,14 +714,21 @@ generateBtn.MouseButton1Click:Connect(function()
 		if result.totalNonWalkable > 0 then
 			nonWalkableText = string.format(" + %d no-walkable", result.totalNonWalkable)
 		end
+		local warningText = ""
+		if #result.missingFloor > 0 then
+			warningText = "\n⚠ sin 'floor': " .. table.concat(result.missingFloor, ", ")
+		end
 		statusLabel.Text = string.format(
-			"%d walkable%s\n%d conexiones, %d zonas",
+			"%d walkable%s\n%d conexiones, %d zonas%s",
 			result.totalWalkable,
 			nonWalkableText,
 			result.totalConnections,
-			result.zonesCount
+			result.zonesCount,
+			warningText
 		)
-		statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+		statusLabel.TextColor3 = #result.missingFloor > 0
+			and Color3.fromRGB(255, 200, 100)  -- Amarillo si hay warnings
+			or Color3.fromRGB(100, 255, 100)   -- Verde si todo OK
 	else
 		statusLabel.Text = "Error: " .. (err or "desconocido")
 		statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)

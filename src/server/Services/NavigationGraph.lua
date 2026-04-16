@@ -8,12 +8,14 @@ function NavigationGraph.new(config)
 
 	config = config or {}
 
-	-- Spatial hashing 2D por piso
-	self.spatialGrids = {}  -- { [floor] = { ["x,z"] = {nodos} } }
+	-- Spatial hashing 3D unificado: { ["x,y,z"] = {nodos} }
+	-- Usa posiciones reales del grafo, sin depender del número de piso
+	self.spatialGrid3D = {}
 	self.cellSizeX = config.cellSizeX or 16
+	self.cellSizeY = config.cellSizeY or 10   -- Resolución vertical: suficiente para separar pisos (≥2× la varianza Y de los nodos de un piso)
 	self.cellSizeZ = config.cellSizeZ or 14
 
-	-- Configuración de altura de pisos (para inferir piso desde posición Y)
+	-- Parámetros legacy (mantenidos para backward compat, ya no se usan en búsquedas)
 	self.floorHeight = config.floorHeight or 10
 	self.floorBaseY = config.floorBaseY or 0
 
@@ -100,21 +102,28 @@ function NavigationGraph:LoadFromFolderStructure(rootFolder, keepSourceParts)
 	end
 
 	-- Cargar conexiones desde los atributos
+	-- Se fuerza bidireccionalidad en runtime: el plugin almacena conexiones por orden
+	-- de distancia cortadas en MAX_CONNECTIONS_PER_NODE, lo que puede generar aristas
+	-- unidireccionales (ej. gateway A→B existe pero B→A fue eliminado por el límite).
+	-- Añadir la inversa garantiza que A* pueda recorrer el grafo en ambas direcciones.
 	for _, conn in ipairs(pendingConnections) do
 		local fromNode = self.nodes[conn.from]
 		local toNode = self.nodes[conn.to]
 
 		if fromNode and toNode then
-			-- Solo añadir si no existe ya (evitar duplicados bidireccionales)
 			if not table.find(fromNode.connections, conn.to) then
 				table.insert(fromNode.connections, conn.to)
 				stats.connections = stats.connections + 1
 			end
+			-- Dirección inversa: garantiza bidireccionalidad aunque el plugin no la almacenara
+			if not table.find(toNode.connections, conn.from) then
+				table.insert(toNode.connections, conn.from)
+			end
 		end
 	end
 
-	-- Construir spatial hash 2D después de cargar
-	self:BuildSpatialHash2D()
+	-- Construir spatial hash 3D después de cargar
+	self:BuildSpatialHash3D()
 
 	-- Limpiar Parts originales (solo si no se mantienen para debug)
 	if not keepSourceParts then
@@ -224,8 +233,8 @@ function NavigationGraph:LoadFromParts(partsFolder, keepSourceParts)
 		partsFolder:Destroy()
 	end
 
-	-- Construir spatial hash automáticamente después de cargar nodos
-	self:BuildSpatialHash2D()
+	-- Construir spatial hash 3D automáticamente después de cargar nodos
+	self:BuildSpatialHash3D()
 
 	-- Warn solo si hay nodos descartados
 	if #discardedNodes > 0 then
@@ -440,72 +449,98 @@ end
 -- SPATIAL HASHING 2D POR PISO
 -- ==============================================================================
 
-function NavigationGraph:BuildSpatialHash2D()
-	self.spatialGrids = {}
+function NavigationGraph:BuildSpatialHash3D()
+	self.spatialGrid3D = {}
+	self.floorYRanges = {}  -- { [floor] = { minY, maxY, avgY } } — mantenido para GetFloorFromPosition
 
-	-- Construir una rejilla 2D (X,Z) por cada piso
+	-- Primer paso: calcular rangos Y reales por piso (para GetFloorFromPosition)
 	for _, node in pairs(self.nodes) do
 		local floor = node.metadata.floor or 0
-
-		-- Crear rejilla para este piso si no existe
-		if not self.spatialGrids[floor] then
-			self.spatialGrids[floor] = {}
+		if not self.floorYRanges[floor] then
+			self.floorYRanges[floor] = { minY = math.huge, maxY = -math.huge, sumY = 0, count = 0 }
 		end
+		local r = self.floorYRanges[floor]
+		if node.position.Y < r.minY then
+			r.minY = node.position.Y
+		end
+		if node.position.Y > r.maxY then
+			r.maxY = node.position.Y
+		end
+		r.sumY = r.sumY + node.position.Y
+		r.count = r.count + 1
+	end
+	for _, r in pairs(self.floorYRanges) do
+		r.avgY = r.sumY / r.count
+	end
 
-		-- Calcular celda 2D (solo X y Z)
+	-- Segundo paso: construir rejilla 3D (X, Y, Z)
+	-- cellSizeY controla la resolución vertical: debe separar pisos apilados
+	-- sin fragmentar un mismo piso (default: 4 studs)
+	for _, node in pairs(self.nodes) do
 		local cellX = math.floor(node.position.X / self.cellSizeX)
+		local cellY = math.floor(node.position.Y / self.cellSizeY)
 		local cellZ = math.floor(node.position.Z / self.cellSizeZ)
-		local cellKey = cellX .. "," .. cellZ
+		local cellKey = cellX .. "," .. cellY .. "," .. cellZ
 
-		if not self.spatialGrids[floor][cellKey] then
-			self.spatialGrids[floor][cellKey] = {}
+		if not self.spatialGrid3D[cellKey] then
+			self.spatialGrid3D[cellKey] = {}
 		end
 
-		table.insert(self.spatialGrids[floor][cellKey], node)
+		table.insert(self.spatialGrid3D[cellKey], node)
 	end
 
 	-- Log estadísticas
-	local floorCount = 0
 	local totalCells = 0
-	for _, grid in pairs(self.spatialGrids) do
-		floorCount = floorCount + 1
-		for _ in pairs(grid) do
-			totalCells = totalCells + 1
-		end
+	local totalNodes = 0
+	for _, nodes in pairs(self.spatialGrid3D) do
+		totalCells = totalCells + 1
+		totalNodes = totalNodes + #nodes
 	end
 
-	self:Log("loading", "SpatialHash2D: " .. floorCount .. " pisos, " .. totalCells .. " celdas totales")
+	self:Log("loading", "SpatialHash3D: " .. totalCells .. " celdas, " .. totalNodes
+		.. " nodos (cellSizeY=" .. self.cellSizeY .. ")")
 end
 
--- Función auxiliar: Inferir piso desde posición Y
+--[[
+	GetFloorFromPosition - Infiere el piso más probable a partir de la posición Y.
+
+	Usa los rangos Y reales de los nodos cargados. Si varios pisos están a la
+	misma altura (zonas distintas), este método puede no ser determinista;
+	en ese caso se recomienda usar GetNearestNode sin parámetro floor para que
+	busque automáticamente en todos los pisos.
+]]
 function NavigationGraph:GetFloorFromPosition(position)
+	if self.floorYRanges and next(self.floorYRanges) then
+		local bestFloor = nil
+		local bestDist = math.huge
+		for floor, range in pairs(self.floorYRanges) do
+			local dist = math.abs(position.Y - range.avgY)
+			if dist < bestDist then
+				bestDist = dist
+				bestFloor = floor
+			end
+		end
+		return bestFloor or 0
+	end
+	-- Fallback: fórmula legacy (solo útil si los pisos están apilados verticalmente)
 	return math.floor((position.Y - self.floorBaseY) / self.floorHeight)
 end
 
 -- Obtener estadísticas del spatial hash
 function NavigationGraph:GetSpatialHashStats()
 	local stats = {
-		floors = {},
 		totalCells = 0,
 		totalNodes = 0,
+		avgNodesPerCell = 0,
 	}
 
-	for floor, grid in pairs(self.spatialGrids) do
-		local cellCount = 0
-		local nodeCount = 0
+	for _, nodes in pairs(self.spatialGrid3D) do
+		stats.totalCells = stats.totalCells + 1
+		stats.totalNodes = stats.totalNodes + #nodes
+	end
 
-		for _, nodes in pairs(grid) do
-			cellCount = cellCount + 1
-			nodeCount = nodeCount + #nodes
-		end
-
-		stats.floors[floor] = {
-			cells = cellCount,
-			nodes = nodeCount,
-			avgNodesPerCell = cellCount > 0 and (nodeCount / cellCount) or 0,
-		}
-		stats.totalCells = stats.totalCells + cellCount
-		stats.totalNodes = stats.totalNodes + nodeCount
+	if stats.totalCells > 0 then
+		stats.avgNodesPerCell = stats.totalNodes / stats.totalCells
 	end
 
 	return stats
@@ -516,36 +551,31 @@ end
 -- ==============================================================================
 
 --[[
-	GetNearestNode busca el nodo más cercano usando spatial hash 2D.
+	GetNearestNode busca el nodo más cercano usando spatial hash 3D.
 
 	Parámetros:
 	- position: Vector3 de la posición a buscar
-	- floor: (opcional) Número de piso. Si no se proporciona, se infiere de position.Y
-	- options: (opcional) Tabla con opciones adicionales:
-	    - searchAllFloors: Si true, busca en todos los pisos (para pathfinding entre pisos)
-	    - includeStairs: Si true, incluye nodos de escalera en la búsqueda
+	- floor: (opcional) Si se especifica, solo devuelve nodos de ese piso
+	- options: (opcional) Tabla con opciones adicionales (reservado para uso futuro)
 ]]
-function NavigationGraph:GetNearestNode(position, floor, options)
-	options = options or {}
-
-	-- Inferir piso si no se proporciona
-	if floor == nil then
-		floor = self:GetFloorFromPosition(position)
-	end
-
-	-- Si no hay spatial hash o se pide buscar en todos los pisos, usar búsqueda especial
-	if not self.spatialGrids or not next(self.spatialGrids) then
-		self:Log("nodeSearch", "SpatialGrids vacío, usando búsqueda linear")
+function NavigationGraph:GetNearestNode(position, floor, _options)
+	if not self.spatialGrid3D or not next(self.spatialGrid3D) then
+		self:Log("nodeSearch", "SpatialGrid3D vacío, usando búsqueda linear")
 		return self:GetNearestNodeLinear(position, floor)
 	end
 
-	-- Búsqueda en el piso especificado
-	local result = self:SearchFloorGrid(position, floor)
+	local result = self:SearchGrid3D(position)
 
-	-- Si no encontramos nada y se permite buscar en otros pisos
-	if not result.node and options.searchAllFloors then
-		self:Log("nodeSearch", "No encontrado en floor " .. floor .. ", buscando en otros pisos")
-		result = self:GetNearestNodeLinear(position, nil)
+	-- Si se especifica floor, verificar que el resultado coincide
+	-- Si no coincide, buscar el más cercano en ese floor específico
+	if floor ~= nil and result.node and result.node.metadata.floor ~= floor then
+		result.node = self:GetNearestNodeLinear(position, floor)
+		result.distance = result.node and (result.node.position - position).Magnitude or math.huge
+	end
+
+	-- Fallback linear si el 3D hash no encontró nada (celdas vacías)
+	if not result.node then
+		result.node = self:GetNearestNodeLinear(position, floor)
 	end
 
 	-- Log resultado
@@ -556,49 +586,88 @@ function NavigationGraph:GetNearestNode(position, floor, options)
 			", checked=" .. result.nodesChecked .. ")")
 	else
 		self:Log("nodeSearch", "NO ENCONTRADO cerca de " ..
-			string.format("(%.1f, %.1f, %.1f)", position.X, position.Y, position.Z) ..
-			" floor=" .. floor)
+			string.format("(%.1f, %.1f, %.1f)", position.X, position.Y, position.Z))
 	end
 
 	return result.node
 end
 
--- Búsqueda optimizada en la rejilla 2D de un piso específico
-function NavigationGraph:SearchFloorGrid(position, floor)
+-- Búsqueda en la rejilla 3D (vecindad 3×3×3 = 27 celdas)
+function NavigationGraph:SearchGrid3D(position)
 	local result = {
 		node = nil,
 		distance = math.huge,
 		nodesChecked = 0,
 	}
 
-	local grid = self.spatialGrids[floor]
-	if not grid then
-		return result
-	end
-
 	local cellX = math.floor(position.X / self.cellSizeX)
+	local cellY = math.floor(position.Y / self.cellSizeY)
 	local cellZ = math.floor(position.Z / self.cellSizeZ)
 
-	-- Buscar en 3x3 grid (9 celdas vecinas) - 3x más rápido que 3D
 	for dx = -1, 1 do
-		for dz = -1, 1 do
-			local key = (cellX + dx) .. "," .. (cellZ + dz)
-			local nodesInCell = grid[key]
+		for dy = -1, 1 do
+			for dz = -1, 1 do
+				local key = (cellX + dx) .. "," .. (cellY + dy) .. "," .. (cellZ + dz)
+				local nodesInCell = self.spatialGrid3D[key]
 
-			if nodesInCell then
-				for _, node in ipairs(nodesInCell) do
-					result.nodesChecked = result.nodesChecked + 1
-					local distance = (node.position - position).Magnitude
+				if nodesInCell then
+					for _, node in ipairs(nodesInCell) do
+						result.nodesChecked = result.nodesChecked + 1
+						local distance = (node.position - position).Magnitude
 
-					if distance < result.distance then
-						result.distance = distance
-						result.node = node
+						if distance < result.distance then
+							result.distance = distance
+							result.node = node
+						end
 					end
 				end
 			end
 		end
 	end
 
+	return result
+end
+
+--[[
+	GetNearestNodeCandidates - Devuelve hasta maxResults nodos cercanos ordenados por distancia.
+
+	Usado como fallback cuando A* falla con el nodo más cercano: permite al caller
+	iterar por candidatos alternativos hasta encontrar uno conectado al destino.
+]]
+function NavigationGraph:GetNearestNodeCandidates(position, maxResults)
+	maxResults = maxResults or 5
+
+	local cellX = math.floor(position.X / self.cellSizeX)
+	local cellY = math.floor(position.Y / self.cellSizeY)
+	local cellZ = math.floor(position.Z / self.cellSizeZ)
+
+	local candidates = {}
+
+	for dx = -1, 1 do
+		for dy = -1, 1 do
+			for dz = -1, 1 do
+				local key = (cellX + dx) .. "," .. (cellY + dy) .. "," .. (cellZ + dz)
+				local nodesInCell = self.spatialGrid3D[key]
+				if nodesInCell then
+					for _, node in ipairs(nodesInCell) do
+						table.insert(candidates, {
+							node = node,
+							distance = (node.position - position).Magnitude,
+						})
+					end
+				end
+			end
+		end
+	end
+
+	table.sort(candidates, function(a, b)
+		return a.distance < b.distance
+	end)
+
+	local result = {}
+	for i = 1, math.min(maxResults, #candidates) do
+		result[i] = candidates[i].node
+	end
 	return result
 end
 
@@ -646,46 +715,38 @@ end
 function NavigationGraph:GetNearestNodeTowardsTarget(npcPosition, targetPosition, floor, candidateRadius)
 	candidateRadius = candidateRadius or 8  -- Debe ser mayor que la separación entre nodos (7 studs)
 
-	-- Inferir piso si no se proporciona
-	if floor == nil then
-		floor = self:GetFloorFromPosition(npcPosition)
-	end
-
-	local grid = self.spatialGrids[floor]
-	if not grid then
-		-- Fallback a búsqueda linear
-		return self:GetNearestNode(npcPosition, floor)
-	end
-
 	local cellX = math.floor(npcPosition.X / self.cellSizeX)
+	local cellY = math.floor(npcPosition.Y / self.cellSizeY)
 	local cellZ = math.floor(npcPosition.Z / self.cellSizeZ)
 
-	-- Recolectar todos los nodos candidatos dentro del radio
+	-- Recolectar candidatos en vecindad 3×3×3 del spatial hash 3D
 	local candidates = {}
 
 	for dx = -1, 1 do
-		for dz = -1, 1 do
-			local key = (cellX + dx) .. "," .. (cellZ + dz)
-			local nodesInCell = grid[key]
-
-			if nodesInCell then
-				for _, node in ipairs(nodesInCell) do
-					local distToNpc = (node.position - npcPosition).Magnitude
-
-					-- Solo considerar nodos dentro del radio de candidatos
-					if distToNpc <= candidateRadius then
-						table.insert(candidates, {
-							node = node,
-							distToNpc = distToNpc,
-							distToTarget = (node.position - targetPosition).Magnitude,
-						})
+		for dy = -1, 1 do
+			for dz = -1, 1 do
+				local key = (cellX + dx) .. "," .. (cellY + dy) .. "," .. (cellZ + dz)
+				local nodesInCell = self.spatialGrid3D[key]
+				if nodesInCell then
+					for _, node in ipairs(nodesInCell) do
+						-- Filtrar por piso si se especificó
+						if floor == nil or node.metadata.floor == floor then
+							local distToNpc = (node.position - npcPosition).Magnitude
+							if distToNpc <= candidateRadius then
+								table.insert(candidates, {
+									node = node,
+									distToNpc = distToNpc,
+									distToTarget = (node.position - targetPosition).Magnitude,
+								})
+							end
+						end
 					end
 				end
 			end
 		end
 	end
 
-	-- Si no hay candidatos, usar método estándar
+	-- Si no hay candidatos, usar método estándar (sin restricción de piso)
 	if #candidates == 0 then
 		self:Log("nodeSearch", "No candidates in radius " .. candidateRadius .. ", using standard search")
 		return self:GetNearestNode(npcPosition, floor)

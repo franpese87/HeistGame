@@ -2,7 +2,6 @@ local NPCAISystem = require(script.NPCAISystem)
 local DoorService = require(script.Services.DoorService)
 local DebugConfig = require(script.Config.DebugConfig)
 local NPCBaseConfig = require(script.Config.NPCBaseConfig)
-local NPCSpawnList = require(script.Config.NPCSpawnList)
 
 local RunService = game:GetService("RunService")
 local isStudio = RunService:IsStudio()
@@ -36,23 +35,16 @@ local navGraph = NPCAISystem.Factory.CreateNavigationGraphFromFolder(
 )
 
 -- ==============================================================================
--- 2. CREAR Y SPAWNEAR NPCs
+-- 2. DESCUBRIR E INICIALIZAR NPCs DEL NIVEL
 -- ==============================================================================
-
-local npcTemplate = game.ServerStorage:FindFirstChild("NPCTemplate")
-if not npcTemplate then
-	error("❌ No se encontró NPCTemplate en ServerStorage")
-end
 
 -- Inyectar logging config en NPCBaseConfig
 local npcConfigWithLogging = table.clone(NPCBaseConfig)
 npcConfigWithLogging.logging = DebugConfig.logging
 
--- SpawnAllNPCs ahora registra automáticamente en el Registry singleton
-local spawnedNPCs = NPCAISystem.Factory.SpawnAllNPCs(
-	npcTemplate,
+-- Descubrir NPCs con tag "NPC" en el nivel e inicializarlos
+local spawnedNPCs = NPCAISystem.Factory.InitializeWorldNPCs(
 	navGraph,
-	NPCSpawnList,
 	npcConfigWithLogging
 )
 
