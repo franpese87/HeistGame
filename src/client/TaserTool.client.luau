@@ -1,8 +1,8 @@
 --[[
 	TaserTool - Arma taser para el jugador
 
-	Crea un Tool "Taser" en el Backpack del jugador.
-	Al activar: envía RemoteEvent al servidor para disparar.
+	Detecta el Tool "Taser" en Backpack/Character (StarterPack lo distribuye)
+	y cablea Activated → TaserFire:FireServer().
 	Muestra cooldown visual en pantalla.
 ]]
 
@@ -12,11 +12,9 @@ local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 
--- Constantes
 local COOLDOWN = 4  -- Debe coincidir con TaserConfig.cooldown (visual local)
 local EVENT_TIMEOUT = 10
 
--- Estado
 local lastFireTime = 0
 
 -- ==============================================================================
@@ -51,38 +49,17 @@ local function createCooldownUI()
 end
 
 -- ==============================================================================
--- TOOL SETUP
+-- TOOL WIRING
 -- ==============================================================================
 
-local function setupTaser()
-	local backpack = player:WaitForChild("Backpack")
-	if backpack:FindFirstChild("Taser") then return end
+local wiredTools = setmetatable({}, {__mode = "k"})
 
-	-- Esperar al evento del servidor
-	local eventFolder = ReplicatedStorage:WaitForChild("Events", EVENT_TIMEOUT)
-	if not eventFolder then
-		warn("[TaserTool] No se encontró la carpeta Events")
-		return
-	end
+local function wireTool(tool, taserEvent, cooldownLabel)
+	if wiredTools[tool] then return end
+	wiredTools[tool] = true
 
-	local taserEvent = eventFolder:WaitForChild("TaserFire", EVENT_TIMEOUT)
-	if not taserEvent then
-		warn("[TaserTool] No se encontró TaserFire RemoteEvent")
-		return
-	end
-
-	-- Crear Tool
-	local tool = Instance.new("Tool")
-	tool.Name = "Taser"
-	tool.RequiresHandle = false
-	tool.CanBeDropped = false
-	tool.Parent = backpack
-
-	-- Crear UI de cooldown
-	local cooldownLabel = createCooldownUI()
 	local cooldownConnection = nil
 
-	-- Activación
 	tool.Activated:Connect(function()
 		local now = os.clock()
 		if now - lastFireTime < COOLDOWN then return end
@@ -95,7 +72,6 @@ local function setupTaser()
 		lastFireTime = now
 		taserEvent:FireServer()
 
-		-- Mostrar cooldown UI
 		cooldownLabel.Visible = true
 		if cooldownConnection then
 			cooldownConnection:Disconnect()
@@ -121,14 +97,48 @@ local function setupTaser()
 end
 
 -- ==============================================================================
--- INICIALIZACIÓN
+-- SETUP
 -- ==============================================================================
 
-player.CharacterAdded:Connect(function()
-	lastFireTime = 0  -- Reset cooldown al respawnear
-	setupTaser()
-end)
+local function resolveEvent()
+	local eventFolder = ReplicatedStorage:WaitForChild("Events", EVENT_TIMEOUT)
+	if not eventFolder then
+		warn("[TaserTool] No se encontró la carpeta Events")
+		return nil
+	end
+	local taserEvent = eventFolder:WaitForChild("TaserFire", EVENT_TIMEOUT)
+	if not taserEvent then
+		warn("[TaserTool] No se encontró TaserFire RemoteEvent")
+		return nil
+	end
+	return taserEvent
+end
 
+local cooldownLabel = createCooldownUI()
+local taserEvent = resolveEvent()
+if not taserEvent then return end
+
+local function watchContainer(container)
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") and child.Name == "Taser" then
+			wireTool(child, taserEvent, cooldownLabel)
+		end
+	end
+	container.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") and child.Name == "Taser" then
+			wireTool(child, taserEvent, cooldownLabel)
+		end
+	end)
+end
+
+local function onCharacter(character)
+	lastFireTime = 0
+	local backpack = player:WaitForChild("Backpack", EVENT_TIMEOUT)
+	if backpack then watchContainer(backpack) end
+	watchContainer(character)
+end
+
+player.CharacterAdded:Connect(onCharacter)
 if player.Character then
-	task.defer(setupTaser)
+	task.defer(onCharacter, player.Character)
 end
