@@ -1,0 +1,6 @@
+{
+	"name": "NodeGeneratorPlugin",
+	"tree": {
+		"$path": "NodeGeneratorPlugin.server.lua"
+	}
+}

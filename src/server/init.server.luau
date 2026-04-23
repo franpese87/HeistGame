@@ -1,1 +1,68 @@
-print("Hello world, from server!")
+local NPCAISystem = require(script.NPCAISystem)
+local DoorService = require(script.Services.DoorService)
+local DebugConfig = require(script.Config.DebugConfig)
+local NPCBaseConfig = require(script.Config.NPCBaseConfig)
+
+local RunService = game:GetService("RunService")
+local isStudio = RunService:IsStudio()
+
+print("🎮 Iniciando sistema de NPCs...")
+
+-- ==============================================================================
+-- 0. INICIALIZAR SERVICIOS
+-- ==============================================================================
+
+DoorService.Init()
+
+-- ==============================================================================
+-- 1. CREAR GRAFO DE NAVEGACIÓN
+-- ==============================================================================
+
+-- Mantener las Parts de nodos si estamos en Studio y showNodes está activo
+local keepNodesForDebug = isStudio and DebugConfig.visualizeOnStartup and DebugConfig.showNodes
+
+local navGraph = NPCAISystem.Factory.CreateNavigationGraphFromFolder(
+	workspace.NavigationNodes,
+	{
+		mode = "hybrid",
+		maxDistance = 40,
+		useRaycast = true,
+		maxConnectionsPerNode = 6,
+		ignoreList = { workspace.NavigationNodes },
+		logging = DebugConfig.logging,
+		keepSourceParts = keepNodesForDebug,
+	}
+)
+
+-- ==============================================================================
+-- 2. DESCUBRIR E INICIALIZAR NPCs DEL NIVEL
+-- ==============================================================================
+
+-- Inyectar logging config en NPCBaseConfig
+local npcConfigWithLogging = table.clone(NPCBaseConfig)
+npcConfigWithLogging.logging = DebugConfig.logging
+
+-- Descubrir NPCs con tag "NPC" en el nivel e inicializarlos
+local spawnedNPCs = NPCAISystem.Factory.InitializeWorldNPCs(
+	navGraph,
+	npcConfigWithLogging
+)
+
+-- Obtener registry e iniciar loop de actualización
+local registry = NPCAISystem.GetRegistry()
+registry:Start()
+
+-- ==============================================================================
+-- 3. REPORTE Y DEBUG (SOLO STUDIO)
+-- ==============================================================================
+
+NPCAISystem.Visualizer.PrintSystemReport(
+	registry,
+	navGraph,
+	spawnedNPCs,
+	NPCBaseConfig
+)
+
+if isStudio and DebugConfig.visualizeOnStartup then
+	NPCAISystem.Visualizer.DrawAll(navGraph, DebugConfig)
+end
