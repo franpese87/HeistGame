@@ -70,12 +70,13 @@ function ProjectileService.Fire(origin, direction, config, ownerInstance)
 
 	-- Crear Part del proyectil
 	local diameter = (config.projectileRadius or 0.3) * 2
+	local color = config.projectileColor or Color3.fromRGB(100, 180, 255)
 	local part = Instance.new("Part")
 	part.Name = "TaserProjectile"
 	part.Shape = Enum.PartType.Ball
 	part.Size = Vector3.new(diameter, diameter, diameter)
 	part.Position = spawnPos
-	part.Color = config.projectileColor or Color3.fromRGB(100, 180, 255)
+	part.Color = color
 	part.Material = Enum.Material.Neon
 	part.Anchored = true
 	part.CanCollide = false
@@ -83,6 +84,28 @@ function ProjectileService.Fire(origin, direction, config, ownerInstance)
 	part.CanQuery = false
 	part.CastShadow = false
 	part.Parent = workspace
+
+	-- Trail para visibilidad durante movimiento del shooter
+	local a0 = Instance.new("Attachment")
+	a0.Name = "TrailA0"
+	a0.Position = Vector3.new(0, 0, diameter * 0.5)
+	a0.Parent = part
+	local a1 = Instance.new("Attachment")
+	a1.Name = "TrailA1"
+	a1.Position = Vector3.new(0, 0, -diameter * 0.5)
+	a1.Parent = part
+	local trail = Instance.new("Trail")
+	trail.Attachment0 = a0
+	trail.Attachment1 = a1
+	trail.Lifetime = 0.25
+	trail.MinLength = 0
+	trail.Color = ColorSequence.new(color)
+	trail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	trail.LightEmission = 1
+	trail.Parent = part
 
 	-- RaycastParams: excluir al shooter
 	local rayParams = RaycastParams.new()
@@ -122,12 +145,10 @@ function ProjectileService._Update(dt)
 		local rayResult = workspace:Raycast(currentPos, moveVector, projectile.raycastParams)
 
 		if rayResult then
-			-- Algo fue golpeado
 			local character = findCharacterFromHit(rayResult.Instance)
 			if character then
 				applyStunToCharacter(character, projectile.stunDuration, projectile.ownerInstance)
 			end
-			-- Destruir proyectil (tanto si golpeó personaje como pared)
 			part:Destroy()
 			table.remove(activeProjectiles, i)
 			continue
