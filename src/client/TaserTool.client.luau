@@ -81,11 +81,14 @@ local function wireTool(tool, taserEvent, cooldownLabel)
 
 	muteToolSounds(tool)
 
+	-- Handle es el Part que porta el sonido posicional 3D del asset.
+	-- Parenteamos nuestro fireSound ahí para emitir desde la mano del player.
+	local handle = tool:FindFirstChild("Handle")
 	local fireSound = Instance.new("Sound")
 	fireSound.Name = FIRE_SOUND_NAME
 	fireSound.SoundId = "rbxassetid://82273261"  -- Taser zap SFX
 	fireSound.Volume = 1
-	fireSound.Parent = tool
+	fireSound.Parent = handle or tool
 
 	local cooldownConnection = nil
 
