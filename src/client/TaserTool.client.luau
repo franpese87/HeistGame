@@ -80,7 +80,7 @@ local function wireTool(tool, taserEvent, cooldownLabel)
 
 	local fireSound = Instance.new("Sound")
 	fireSound.Name = "TaserFireSound"
-	fireSound.SoundId = "rbxassetid://130113322"  -- Tesla coil zap (Roblox library)
+	fireSound.SoundId = "rbxassetid://82273261"  -- Taser zap SFX
 	fireSound.Volume = 1
 	fireSound.Parent = tool
 
