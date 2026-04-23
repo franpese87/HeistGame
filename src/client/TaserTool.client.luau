@@ -86,22 +86,6 @@ local function wireTool(tool, taserEvent, cooldownLabel)
 	wiredTools[tool] = true
 
 	local cooldownConnection = nil
-	local holdTrack = nil
-
-	tool.Equipped:Connect(function()
-		holdTrack = loadTrack(TaserConfig.toolholdAnimationId, true, Enum.AnimationPriority.Action)
-		if holdTrack then
-			holdTrack:Play(0.1)
-		end
-	end)
-
-	tool.Unequipped:Connect(function()
-		if holdTrack then
-			holdTrack:Stop(0.1)
-			holdTrack:Destroy()
-			holdTrack = nil
-		end
-	end)
 
 	tool.Activated:Connect(function()
 		local now = os.clock()
