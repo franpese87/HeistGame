@@ -56,17 +56,20 @@ end
 
 local wiredTools = setmetatable({}, {__mode = "k"})
 
+local FIRE_SOUND_NAME = "TaserFireSound"
+
 -- Mutea todos los Sounds descendientes del Tool para que el cooldown
 -- sea la fuente única de feedback de audio. El asset Roblox Taser trae
 -- Sounds en Activated que disparan aunque el cooldown nuestro bloquee.
+-- Excluye nuestro propio fireSound por nombre.
 local function muteToolSounds(tool)
 	for _, d in ipairs(tool:GetDescendants()) do
-		if d:IsA("Sound") then
+		if d:IsA("Sound") and d.Name ~= FIRE_SOUND_NAME then
 			d.Volume = 0
 		end
 	end
 	tool.DescendantAdded:Connect(function(d)
-		if d:IsA("Sound") then
+		if d:IsA("Sound") and d.Name ~= FIRE_SOUND_NAME then
 			d.Volume = 0
 		end
 	end)
@@ -79,7 +82,7 @@ local function wireTool(tool, taserEvent, cooldownLabel)
 	muteToolSounds(tool)
 
 	local fireSound = Instance.new("Sound")
-	fireSound.Name = "TaserFireSound"
+	fireSound.Name = FIRE_SOUND_NAME
 	fireSound.SoundId = "rbxassetid://82273261"  -- Taser zap SFX
 	fireSound.Volume = 1
 	fireSound.Parent = tool
