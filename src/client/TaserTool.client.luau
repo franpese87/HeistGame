@@ -58,28 +58,30 @@ local wiredTools = setmetatable({}, {__mode = "k"})
 
 local FIRE_SOUND_NAME = "TaserFireSound"
 
--- Mutea todos los Sounds descendientes del Tool para que el cooldown
--- sea la fuente única de feedback de audio. El asset Roblox Taser trae
--- Sounds en Activated que disparan aunque el cooldown nuestro bloquee.
--- Excluye nuestro propio fireSound por nombre.
-local function muteToolSounds(tool)
-	for _, d in ipairs(tool:GetDescendants()) do
+-- Desactiva los scripts y sonidos propios del asset Roblox Taser para que
+-- nuestra lógica (cooldown, audio, projectile) sea la única fuente de
+-- comportamiento. El asset trae LocalScripts con su propio cooldown y
+-- Sounds en Activated que interferían con el nuestro.
+local function sanitizeTool(tool)
+	local function handle(d)
 		if d:IsA("Sound") and d.Name ~= FIRE_SOUND_NAME then
 			d.Volume = 0
+		elseif d:IsA("LocalScript") or d:IsA("Script") then
+			d.Disabled = true
 		end
 	end
-	tool.DescendantAdded:Connect(function(d)
-		if d:IsA("Sound") and d.Name ~= FIRE_SOUND_NAME then
-			d.Volume = 0
-		end
-	end)
+	for _, d in ipairs(tool:GetDescendants()) do
+		handle(d)
+	end
+	tool.DescendantAdded:Connect(handle)
 end
 
 local function wireTool(tool, taserEvent, cooldownLabel)
 	if wiredTools[tool] then return end
 	wiredTools[tool] = true
 
-	muteToolSounds(tool)
+	sanitizeTool(tool)
+	tool.Enabled = true
 
 	-- Handle es el Part que porta el sonido posicional 3D del asset.
 	-- Parenteamos nuestro fireSound ahí para emitir desde la mano del player.
@@ -104,6 +106,13 @@ local function wireTool(tool, taserEvent, cooldownLabel)
 		lastFireTime = now
 		taserEvent:FireServer()
 		fireSound:Play()
+
+		-- Roblox desactiva Tool.Enabled tras Activated (cooldown built-in
+		-- de ~1s). Re-habilitamos para que nuestro cooldown sea la única
+		-- fuente de verdad.
+		task.defer(function()
+			tool.Enabled = true
+		end)
 
 		cooldownLabel.Visible = true
 		if cooldownConnection then
