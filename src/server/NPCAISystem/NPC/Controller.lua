@@ -88,6 +88,11 @@ function Controller.new(pawn, navigationGraph, config)
 	-- Stun
 	self.stunDuration = config.stunDuration or 3
 
+	-- Arma
+	self.weaponType = config.weaponType or "melee"
+	self.taserEngageDistance = config.taserEngageDistance or 20
+	self.lastTaserFireTime = 0
+
 	-- FSM configuracion (sandbox/testing)
 	self.allowedStates = config.allowedStates
 	self.disableSenses = config.disableSenses or false

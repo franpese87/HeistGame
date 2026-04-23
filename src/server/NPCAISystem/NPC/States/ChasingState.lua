@@ -52,7 +52,8 @@ function ChasingState.Update(ctrl)
 	end
 
 	local distance = (ctrl.pawn:GetPosition() - targetRoot.Position).Magnitude
-	if distance <= ctrl.combatSystem.attackRange then
+	local engageDistance = ctrl.weaponType == "taser" and ctrl.taserEngageDistance or ctrl.combatSystem.attackRange
+	if distance <= engageDistance then
 		ctrl.pathFollower:ClearPath()
 		ctrl:ChangeState("Attacking")
 		return
