@@ -18,20 +18,6 @@ print("🎮 Iniciando sistema de NPCs...")
 DoorService.Init()
 ProjectileService.Init()
 
--- Limpieza del asset Roblox Taser en StarterPack.
--- El asset trae un LocalScript (Stickmasterluke) con cooldown propio de 3s
--- y toggling de Tool.Enabled que interfiere con nuestra lógica cliente.
--- Se destruye aquí para que el Tool distribuido al Backpack venga limpio.
-local StarterPack = game:GetService("StarterPack")
-local taserTemplate = StarterPack:FindFirstChild("Taser")
-if taserTemplate then
-	for _, d in ipairs(taserTemplate:GetDescendants()) do
-		if d:IsA("LocalScript") or d:IsA("Script") then
-			d:Destroy()
-		end
-	end
-end
-
 -- ==============================================================================
 -- 0.5 REMOTE EVENTS
 -- ==============================================================================
