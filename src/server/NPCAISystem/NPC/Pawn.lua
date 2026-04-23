@@ -131,7 +131,7 @@ function Pawn:_InitializeAnimations()
 
 	-- Tracks de arma (solo NPCs taser, solo si hay ID configurado)
 	if self.weaponType == "taser" then
-		local TaserConfig = require(script.Parent.Parent.Parent.Config.TaserConfig)
+		local TaserConfig = require(ReplicatedStorage.Shared.TaserConfig)
 
 		local toolholdId = TaserConfig.toolholdAnimationId
 		if toolholdId and toolholdId ~= "" then

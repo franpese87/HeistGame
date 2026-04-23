@@ -1,5 +1,6 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ProjectileService = require(script.Parent.Parent.Parent.Parent.Services.ProjectileService)
-local TaserConfig = require(script.Parent.Parent.Parent.Parent.Config.TaserConfig)
+local TaserConfig = require(ReplicatedStorage.Shared.TaserConfig)
 
 local AttackingState = {}
 

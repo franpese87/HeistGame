@@ -1,11 +1,12 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
 local NPCAISystem = require(script.NPCAISystem)
 local DoorService = require(script.Services.DoorService)
 local ProjectileService = require(script.Services.ProjectileService)
-local TaserConfig = require(script.Config.TaserConfig)
+local TaserConfig = require(ReplicatedStorage.Shared.TaserConfig)
 local DebugConfig = require(script.Config.DebugConfig)
 local NPCBaseConfig = require(script.Config.NPCBaseConfig)
-
-local RunService = game:GetService("RunService")
 local isStudio = RunService:IsStudio()
 
 print("🎮 Iniciando sistema de NPCs...")
@@ -21,7 +22,6 @@ ProjectileService.Init()
 -- 0.5 REMOTE EVENTS
 -- ==============================================================================
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local eventsFolder = ReplicatedStorage:FindFirstChild("Events")

@@ -15,9 +15,11 @@ return {
 	projectileColor = Color3.fromRGB(100, 180, 255),  -- azul eléctrico
 	projectileYOffset = 0,       -- offset Y desde RootPart del shooter (0 = altura de cadera)
 
-	-- Animación
-	shootAnimationId = "",       -- placeholder: asignar rbxassetid://... cuando esté listo
-	toolholdAnimationId = "",    -- placeholder: animación de apuntado NPC (loop durante ATTACKING)
+	-- Animación (genéricas de Roblox como placeholder — reemplazar con animaciones custom de taser)
+	-- Hold/Aim: loop mientras Tool equipado (player) o en ATTACKING (NPC)
+	toolholdAnimationId = "rbxassetid://507770239",  -- Roblox "Point" R15 default (aim pose aproximada)
+	-- Shoot: one-shot al disparar
+	shootAnimationId = "rbxassetid://507770453",     -- Roblox "Wave" R15 default (action aproximada)
 
 	-- Modelo de la tool (jugador)
 	toolModelId = "rbxassetid://179399313",  -- Roblox Taser (catalog free model)
