@@ -56,31 +56,6 @@ end
 
 local wiredTools = setmetatable({}, {__mode = "k"})
 
-local function getAnimator()
-	local character = player.Character
-	if not character then return nil end
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then return nil end
-	local animator = humanoid:FindFirstChildOfClass("Animator")
-	if not animator then
-		animator = Instance.new("Animator")
-		animator.Parent = humanoid
-	end
-	return animator
-end
-
-local function loadTrack(animId, looped, priority)
-	if not animId or animId == "" then return nil end
-	local animator = getAnimator()
-	if not animator then return nil end
-	local anim = Instance.new("Animation")
-	anim.AnimationId = animId
-	local track = animator:LoadAnimation(anim)
-	track.Looped = looped
-	track.Priority = priority or Enum.AnimationPriority.Action
-	return track
-end
-
 local function wireTool(tool, taserEvent, cooldownLabel)
 	if wiredTools[tool] then return end
 	wiredTools[tool] = true
@@ -98,15 +73,6 @@ local function wireTool(tool, taserEvent, cooldownLabel)
 
 		lastFireTime = now
 		taserEvent:FireServer()
-
-		-- Shoot animation one-shot
-		local shootTrack = loadTrack(TaserConfig.shootAnimationId, false, Enum.AnimationPriority.Action4)
-		if shootTrack then
-			shootTrack:Play(0.05)
-			shootTrack.Stopped:Once(function()
-				shootTrack:Destroy()
-			end)
-		end
 
 		cooldownLabel.Visible = true
 		if cooldownConnection then
