@@ -55,8 +55,10 @@ taserEvent.OnServerEvent:Connect(function(player)
 	if not humanoid or humanoid.Health <= 0 then return end
 
 	-- Usar posición y dirección del SERVER (anti-spoofing)
-	local origin = rootPart.Position
 	local direction = (rootPart.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+	-- Offset forward: evita que el proyectil spawnee dentro del hitbox
+	-- del player en movimiento (velocidad player + lag puede solapar con el ray).
+	local origin = rootPart.Position + direction * 2
 
 	lastFireTimes[player] = now
 	ProjectileService.Fire(origin, direction, TaserConfig, character)
