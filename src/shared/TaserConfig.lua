@@ -17,7 +17,7 @@ return {
 
 	-- Animación
 	-- Shoot: one-shot al disparar
-	shootAnimationId = "rbxassetid://507770239",     -- Roblox "Point" R15 default
+	shootAnimationId = "rbxassetid://507770453",     -- Roblox "Point" R15 default
 
 	-- Modelo de la tool (jugador)
 	toolModelId = "rbxassetid://179399313",  -- Roblox Taser (catalog free model)
