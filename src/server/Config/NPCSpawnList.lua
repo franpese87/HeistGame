@@ -17,5 +17,6 @@ return {
 	{
 		name = "Guard_2",
 		patrolRoute = { "Node_0_951", "Node_0_928" },
+		weaponType = "taser",
 	},
 }

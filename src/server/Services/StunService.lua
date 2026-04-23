@@ -26,9 +26,12 @@ function StunService.Apply(humanoid, duration)
 	end
 
 	-- Programar restauración (si se llama de nuevo, el nuevo delay sobreescribe)
-	task.delay(duration, function()
-		StunService.Remove(humanoid)
-	end)
+	-- Si duration es math.huge, el caller gestiona la restauración manualmente
+	if duration and duration < math.huge then
+		task.delay(duration, function()
+			StunService.Remove(humanoid)
+		end)
+	end
 end
 
 -- Restaura el Humanoid a sus valores originales inmediatamente.

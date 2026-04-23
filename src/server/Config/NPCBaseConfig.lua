@@ -70,6 +70,10 @@ return {
 	-- Stun por portazo
 	stunDuration = 3,             -- [DIFICULTAD] Duración del aturdimiento (segundos)
 
+	-- Tipo de arma
+	weaponType = "melee",             -- "melee" o "taser" (configurable por NPC)
+	taserEngageDistance = 20,          -- [DIFICULTAD] Distancia a la que el NPC taser empieza a disparar (studs)
+
 	-- Indicador visual de estado (debug)
 	stateIndicatorOffset = 4,
 

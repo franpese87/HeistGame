@@ -79,6 +79,8 @@ function Pawn.new(npcInstance, config)
 	config = config or {}
 	self.patrolSpeed = config.patrolSpeed or 16
 	self.chaseSpeed = config.chaseSpeed or 24
+	self.weaponType = config.weaponType or "melee"
+	self.equippedWeaponTool = nil
 
 	-- Inicializar sistema de animaciones
 	self:_InitializeAnimations()
@@ -127,6 +129,39 @@ function Pawn:_InitializeAnimations()
 		self.janitor:Add(track, "Destroy")
 	end
 
+	-- Tracks de arma (solo NPCs taser, solo si hay ID configurado)
+	if self.weaponType == "taser" then
+		local TaserConfig = require(ReplicatedStorage.Shared.TaserConfig)
+
+		local toolholdId = TaserConfig.toolholdAnimationId
+		if toolholdId and toolholdId ~= "" then
+			local toolholdAnim = Instance.new("Animation")
+			toolholdAnim.Name = "toolhold"
+			toolholdAnim.AnimationId = toolholdId
+			self.animations["toolhold"] = toolholdAnim
+
+			local toolholdTrack = self.animator:LoadAnimation(toolholdAnim)
+			toolholdTrack.Looped = true
+			toolholdTrack.Priority = Enum.AnimationPriority.Action
+			self.animationTracks["toolhold"] = toolholdTrack
+			self.janitor:Add(toolholdTrack, "Destroy")
+		end
+
+		local shootId = TaserConfig.shootAnimationId
+		if shootId and shootId ~= "" then
+			local shootAnim = Instance.new("Animation")
+			shootAnim.Name = "shoot"
+			shootAnim.AnimationId = shootId
+			self.animations["shoot"] = shootAnim
+
+			local shootTrack = self.animator:LoadAnimation(shootAnim)
+			shootTrack.Looped = false
+			shootTrack.Priority = Enum.AnimationPriority.Action
+			self.animationTracks["shoot"] = shootTrack
+			self.janitor:Add(shootTrack, "Destroy")
+		end
+	end
+
 	self.currentAnimation = nil
 	self.currentTrack = nil
 
@@ -157,12 +192,62 @@ function Pawn:PlayAnimation(animName, fadeTime)
 	self.currentTrack = track
 end
 
+-- Reproduce una animación non-looped y retoma la animación previa al terminar.
+-- Si la animación es interrumpida externamente (cambio de estado), no retoma.
+function Pawn:PlayAnimationOnce(animName, fadeTime)
+	if not self.animationTracks[animName] then return end
+	fadeTime = fadeTime or 0.1
+
+	local track = self.animationTracks[animName]
+	local previousAnimation = self.currentAnimation or "idle"
+
+	if self.currentTrack then
+		self.currentTrack:Stop(fadeTime)
+	end
+
+	self.currentAnimation = animName
+	self.currentTrack = track
+	track:Play(fadeTime)
+
+	track.Stopped:Once(function()
+		if self.currentAnimation == animName then
+			self.currentAnimation = nil
+			self.currentTrack = nil
+			self:PlayAnimation(previousAnimation, fadeTime)
+		end
+	end)
+end
+
 function Pawn:StopAnimations()
 	for _, track in pairs(self.animationTracks) do
 		track:Stop(0.1)
 	end
 	self.currentAnimation = nil
 	self.currentTrack = nil
+end
+
+-- ==============================================================================
+-- VISUAL DE ARMA
+-- ==============================================================================
+
+function Pawn:EquipWeaponVisual()
+	if self.weaponType ~= "taser" then return end
+	if self.equippedWeaponTool then return end
+	local taserTemplate = game:GetService("StarterPack"):FindFirstChild("Taser")
+	if not taserTemplate then return end
+
+	local clone = taserTemplate:Clone()
+	clone.CanBeDropped = false
+	clone.Parent = self.instance
+	self.humanoid:EquipTool(clone)
+	self.equippedWeaponTool = clone
+end
+
+function Pawn:UnequipWeaponVisual()
+	if self.equippedWeaponTool then
+		self.equippedWeaponTool:Destroy()
+		self.equippedWeaponTool = nil
+	end
 end
 
 function Pawn:SetAnimationSpeed(speed)
@@ -459,6 +544,8 @@ end
 -- ==============================================================================
 
 function Pawn:Destroy()
+	self:UnequipWeaponVisual()
+
 	-- Janitor limpia automáticamente: tweens, tracks, billboard
 	self.janitor:Destroy()
 
