@@ -80,6 +80,7 @@ function Pawn.new(npcInstance, config)
 	self.patrolSpeed = config.patrolSpeed or 16
 	self.chaseSpeed = config.chaseSpeed or 24
 	self.weaponType = config.weaponType or "melee"
+	self.equippedWeaponTool = nil
 
 	-- Inicializar sistema de animaciones
 	self:_InitializeAnimations()
@@ -128,9 +129,24 @@ function Pawn:_InitializeAnimations()
 		self.janitor:Add(track, "Destroy")
 	end
 
-	-- Track de disparo (solo NPCs taser, solo si hay ID configurado)
+	-- Tracks de arma (solo NPCs taser, solo si hay ID configurado)
 	if self.weaponType == "taser" then
 		local TaserConfig = require(script.Parent.Parent.Parent.Config.TaserConfig)
+
+		local toolholdId = TaserConfig.toolholdAnimationId
+		if toolholdId and toolholdId ~= "" then
+			local toolholdAnim = Instance.new("Animation")
+			toolholdAnim.Name = "toolhold"
+			toolholdAnim.AnimationId = toolholdId
+			self.animations["toolhold"] = toolholdAnim
+
+			local toolholdTrack = self.animator:LoadAnimation(toolholdAnim)
+			toolholdTrack.Looped = true
+			toolholdTrack.Priority = Enum.AnimationPriority.Action
+			self.animationTracks["toolhold"] = toolholdTrack
+			self.janitor:Add(toolholdTrack, "Destroy")
+		end
+
 		local shootId = TaserConfig.shootAnimationId
 		if shootId and shootId ~= "" then
 			local shootAnim = Instance.new("Animation")
@@ -208,6 +224,30 @@ function Pawn:StopAnimations()
 	end
 	self.currentAnimation = nil
 	self.currentTrack = nil
+end
+
+-- ==============================================================================
+-- VISUAL DE ARMA
+-- ==============================================================================
+
+function Pawn:EquipWeaponVisual()
+	if self.weaponType ~= "taser" then return end
+	if self.equippedWeaponTool then return end
+	local taserTemplate = game:GetService("StarterPack"):FindFirstChild("Taser")
+	if not taserTemplate then return end
+
+	local clone = taserTemplate:Clone()
+	clone.CanBeDropped = false
+	clone.Parent = self.instance
+	self.humanoid:EquipTool(clone)
+	self.equippedWeaponTool = clone
+end
+
+function Pawn:UnequipWeaponVisual()
+	if self.equippedWeaponTool then
+		self.equippedWeaponTool:Destroy()
+		self.equippedWeaponTool = nil
+	end
 end
 
 function Pawn:SetAnimationSpeed(speed)
@@ -504,6 +544,8 @@ end
 -- ==============================================================================
 
 function Pawn:Destroy()
+	self:UnequipWeaponVisual()
+
 	-- Janitor limpia automáticamente: tweens, tracks, billboard
 	self.janitor:Destroy()
 
